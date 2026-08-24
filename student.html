@@ -8,8 +8,8 @@
   <style>
     body, button, input, select, textarea { font-family: 'Inter', sans-serif;}
         :root {
-      --uoa-blue: #15538A;
-      --uoa-blue-hover: #1c669f;
+      --sta-blue: #00539b;
+      --sta-blue-hover: #007bc2;
       --danger: #b42318;
       --danger-hover: #8f1d14;
       --border: #d0d5dd;
@@ -50,25 +50,25 @@
 
     /* View buttons */
     .btn-view {
-      background-color: var(--uoa-blue);
+      background-color: var(--sta-blue);
       color: var(--text-light);
     }
 
     .btn-view:hover {
-      background-color: var(--uoa-blue-hover);
+      background-color: var(--sta-blue-hover);
     }
     #toggleBtn {
       cursor: pointer;
-      border: 1px solid #15538A; /* UoA blue */
+      border: 1px solid #00539b; /* StA blue */
       border-radius: 4px;
       background-color: #ffffff;
-      color: #15538A;
+      color: #00539b;
       font-size: 1rem;
       line-height: 1;
     }
 
     #toggleBtn:hover {
-      background-color: #15538A;
+      background-color: #00539b;
       color: #ffffff;
     }
 
@@ -101,9 +101,9 @@
      .conf-btn {
       padding: 0.45rem 0.75rem;
       border-radius: 6px;
-      border: 1px solid #15538A; /* UoA blue */
+      border: 1px solid #00539b; /* StoA blue */
       background-color: #ffffff;
-      color: #15538A;
+      color: #00539b;
       cursor: pointer;
       font-family: 'Inter', sans-serif;
       font-weight: 500;
@@ -121,7 +121,7 @@
     #assignments .card { overflow: hidden; }               /* prevent sub-pixel bleed */
     #assignments .card .small { overflow-wrap: anywhere; } /* long words/URLs won’t push width */
         .conf-btn:hover {
-          background-color: #15538A;
+          background-color: #00539b;
           color: #ffffff;
     }
 
@@ -139,7 +139,7 @@
 
     <div class="banner" id="infoBanner">
       <div>
-        <strong>Note:</strong> By submitting, you agree that your response may be shown anonymously during class discussion and saved for course-related use.
+        <strong>Note:</strong> By submitting, you agree that your response may be shown anonymously during class discussion. Responses are submitted anonymously and will be deleted at the end of the course.
       </div>
       <div class="small" style="margin-top:8px;">
         <span><b>Instructor:</b> <span id="instLabel">—</span></span>
@@ -151,12 +151,6 @@
         <span class="countdown"><span id="countdown">—</span></span>-->
       </div>
       <div id="phaseToast" class="toast">Peer review is now open.</div>
-    </div>
-
-    <!-- Name/ID -->
-    <div class="row" style="margin-top:10px;">
-      <label for="uniqueId" style="min-width:120px;">Your name / ID</label>
-      <input id="uniqueId" type="text" placeholder="e.g., Student ID" autocomplete="name">
     </div>
 
     <!-- Response -->
@@ -190,7 +184,7 @@
 
     <!-- Submit -->
     <div style="margin-top:12px;">
-      <button id="submitBtn" onclick="submitResponse()" class="btn btn-view" aria-label="Submit" title="Submit"disabled>➤<span class="btn-label">Submit</span></button>
+      <button id="submitBtn" onclick="submitResponse()" class="btn btn-view" aria-label="Submit" title="Submit">➤<span class="btn-label">Submit</span></button>
       <!-- Review navigation button kept hidden; students need not navigate away -->
       <button id="reviewBtn" style="margin-left:8px; display:none;" onclick="goToReview()">Peer review (projector)</button>
       <span id="status" class="status"></span>
@@ -224,52 +218,18 @@
     let ASSIGNMENTS_LOADED = false;
     let ASSIGNED_IDS = [];
 
-    // Auto-fill unique ID from signed-in account and lock the field
-    (function prefillUniqueIdFromWorkspace() {
-      // Disable submit until we know who this is
-      const submitBtn = document.getElementById('submitBtn');
-      if (submitBtn) submitBtn.disabled = true;
+    let REVIEWER_TOKEN = localStorage.getItem('reviewer_token');
 
-      // Don’t proceed unless we are in Apps Script
-      if (!(window.google && google.script && google.script.run)) return;
+    if (!REVIEWER_TOKEN) {
+      REVIEWER_TOKEN =
+        Date.now().toString(36) +
+        Math.random().toString(36).substring(2);
 
-      const input = document.getElementById('uniqueId');
-      const label = document.querySelector('label[for="uniqueId"]');
-      const status = document.getElementById('status');
-
-      google.script.run
-        .withSuccessHandler(function (res) {
-          if (res && res.ok) {
-            // Prefer UPI as the unique identifier; you can also switch to res.email if needed
-            if (input) {
-              input.value = res.upi || res.email || '';
-              input.readOnly = true;              // lock it
-              input.setAttribute('aria-readonly', 'true');
-            }
-            if (label) label.textContent = 'Signed in as';
-            if (submitBtn) submitBtn.disabled = false; // now safe to submit
-            if (CURRENT_PHASE === 'review' && !ASSIGNMENTS_LOADED) {try { maybeLoadAssignments(); } catch (e) {}}
-          } else {
-            // If domain sign-in fails, block submission and show a friendly message
-            if (submitBtn) submitBtn.disabled = true;
-            if (status) {
-              status.textContent = (res && res.error)
-                ? res.error
-                : 'Sign-in required with @aucklanduni.ac.nz.';
-              status.className = 'status err';
-            }
-          }
-        })
-        .withFailureHandler(function (err) {
-          if (submitBtn) submitBtn.disabled = true;
-          if (status) {
-            status.textContent = 'Could not verify your sign-in. Please reload or try again.';
-            status.className = 'status err';
-          }
-        })
-        .apiGetSignedInIdentity();
-    })();
-    
+      localStorage.setItem('reviewer_token', REVIEWER_TOKEN);
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('submitBtn').disabled = false;
+      });
     function normalizeSearch(raw){
       return String(raw || '').replace(/&amp;amp;amp;amp;/g, '&');
     }
@@ -427,26 +387,26 @@
       });
     });
     function submitResponse(){
-      const nameOrId = document.getElementById('uniqueId').value.trim();
+      const reviewerToken = REVIEWER_TOKEN;
       const text     = document.getElementById('responseText').value.trim();
       const conf     = Number(document.getElementById('confidence').value);
 
       if (CURRENT_PHASE === 'review') { setStatus('Writing is disabled during peer review.', true); return; }
-      if (!nameOrId) { setStatus('Please enter your name/ID.', true); return; }
       if (!text)     { setStatus('Please enter a response.', true); return; }
       if (!SESSION_ID) { setStatus('No active session. Please try again later.', true); return; }
 
       setStatus('Submitting…');
       document.getElementById('submitBtn').disabled = true;
 
-      const payload = { response_text_original: text, unique_id: nameOrId, confidence: conf, is_poll: false, poll_value_normalized: '' };
+      const payload = { response_text_original: text, 
+      reviewer_token: reviewerToken, confidence: conf, is_poll: false, poll_value_normalized: '' };
 
       google.script.run
         .withSuccessHandler(res=>{
           if (res && res.ok) {
             document.getElementById('responseText').value = '';
             setStatus('Submitted. Thank you!', false);
-            try { sessionStorage.setItem('unique_id', nameOrId); } catch(e){}
+            try { sessionStorage.setItem('reviewer_token', reviewerToken);} catch(e){}
             const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
           } else {
             setStatus(res && res.error ? res.error : 'Submission failed.', true);
@@ -459,7 +419,7 @@
               if (res2 && res2.ok) {
                 document.getElementById('responseText').value = '';
                 setStatus('Submitted. Thank you!', false);
-                try { sessionStorage.setItem('unique_id', nameOrId); } catch(e){}
+                try { sessionStorage.setItem('reviewer_token', reviewerToken); } catch(e){}
                 const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
               } else {
                 setStatus(res2 && res2.error ? res2.error : 'Submission failed.', true);
@@ -470,14 +430,14 @@
               setStatus(String(err2), true);
               document.getElementById('submitBtn').disabled = false;
             })
-            .submitResponse(text, nameOrId, '', SESSION_ID, INSTRUCTOR_ID, conf);
+            .submitResponse(text, reviewerToken, '', SESSION_ID, INSTRUCTOR_ID, conf);
         })
         .apiSubmitResponse(SESSION_ID, payload);
     }
 
     // Inline peer review
     function maybeLoadAssignments(){
-      const uid = (document.getElementById('uniqueId').value || sessionStorage.getItem('unique_id') || '').trim();
+      const uid = (sessionStorage.getItem('reviewer_token') ||REVIEWER_TOKEN).trim();
       const reviewEl = document.getElementById('reviewPanel');
       if (!uid || !SESSION_ID) { reviewEl.style.display = 'none'; return; }
 
@@ -563,7 +523,9 @@
     }
 
     function submitFeedback(rid){
-      const uid = (document.getElementById('uniqueId').value || sessionStorage.getItem('unique_id') || '').trim();
+      const uid = (
+      sessionStorage.getItem('reviewer_token') ||
+      REVIEWER_TOKEN).trim();
       const ta = document.getElementById('fb_' + rid);
       const txt = ta ? (ta.value || '').trim() : '';
       const btn = document.getElementById('btn_' + rid);

@@ -11,10 +11,8 @@
     header { display: flex; gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid #ddd; }
     .list { padding: 12px; display: grid; gap: 8px; }
     :root {
-      --uoa-blue: #15538A;
-      --uoa-blue-hover: #1c669f;
-      --danger: #b42318;
-      --danger-hover: #8f1d14;
+      --sta-blue: #00539b;
+      --sta-blue-hover: #007bc2;
       --border: #d0d5dd;
       --text-light: #ffffff;
     }
@@ -46,8 +44,8 @@
     .btn-stop:hover { background-color: var(--danger-hover); }
 
     /* View buttons */
-    .btn-view { background-color: var(--uoa-blue); color: var(--text-light); }
-    .btn-view:hover { background-color: var(--uoa-blue-hover); }
+    .btn-view { background-color: var(--sta-blue); color: var(--text-light); }
+    .btn-view:hover { background-color: var(--sta-blue-hover); }
 
     /* Board container */
     #listView.board { position: relative; display: grid !important; min-height: 70vh; padding: 12px; background: #fff; overflow: auto; align-items: start; align-content: start;}
@@ -190,10 +188,9 @@
     <header>
       <span><b>Session:</b> <span id="sessionLabel">—</span></span>
       <label style="margin-left:12px;">Status: <span id="refreshStatus">Inactive</span></label>
-      <button class="btn btn-stop" onclick="stopSession()" aria-label="End session" title="End session">
-        🛑 <span class="btn-label">Stop</span>
-      </button>
-
+      <button class="btn btn-view" onclick="loadResponses()">
+        🔄 Refresh
+        </button>
       <!-- View toggles -->
       <span class="view-toggle">
         <button type="button" class="btn btn-view" onclick="setViewCards()" aria-label="Card view" title="Card view">
@@ -241,7 +238,6 @@
     // --- State ---
     let INSTRUCTOR_ID = '';
     let currentSessionId = '';
-    let activeUntil = null;
 
     let RESPONSES = [];
     let CURRENT_PHASE = 'writing';
@@ -288,12 +284,6 @@
       renderConfidence();
       bumpDebugChip();
     }
-
-    // Auto refresh timer (every 5s)
-    let refreshTimer = null;
-    const autoRefreshSeconds = 5;
-    function startAutoRefresh(){ stopAutoRefresh(); refreshTimer = setInterval(loadResponses, autoRefreshSeconds * 1000); }
-    function stopAutoRefresh(){ if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } }
 
     // Tag groups
     const PERFORMANCE_TAGS = ['Outstanding','Strong','Developing','Emerging','Incomplete'];
@@ -369,9 +359,6 @@
                 if (startRes && startRes.ok) {
                   INSTRUCTOR_ID = inst;
                   currentSessionId = sessionId;
-                  activeUntil = startRes.active_until ? new Date(startRes.active_until)
-                                   : new Date(Date.now() + duration_mins * 60000);
-
                   CURRENT_PHASE = 'writing';
                   HISTORY_WINDOW_MINS = 5;
 
@@ -379,8 +366,6 @@
                   msg.style.color = '#0a7';
                   msg.textContent = 'Session started. Loading…';
                   loadResponses();
-                  startCountdown();
-                  startAutoRefresh();
                 } else {
                   msg.style.color = '#c00';
                   msg.textContent = (startRes && startRes.error) || 'Could not start session.';
@@ -412,6 +397,7 @@
       const dashView = document.getElementById('dashView');
       dashView.style.display = 'block';
       document.getElementById('sessionLabel').textContent = sessionId;
+      document.getElementById('refreshStatus').textContent = 'Ready';
 
       render();
     }
@@ -458,40 +444,15 @@
         .apiStartPeerReview(INSTRUCTOR_ID, currentSessionId, mins, k);
     }
 
-    // --- Stop session ---
-    function stopSession(){
-      if (!INSTRUCTOR_ID || !currentSessionId) return;
-      google.script.run
-        .withSuccessHandler(()=>{
-          document.getElementById('refreshStatus').textContent = 'Stopped';
-          stopAutoRefresh();
-          alert('Session stopped.');
-        })
-        .withFailureHandler(err=>alert(String(err)))
-        .apiStopSession(INSTRUCTOR_ID, currentSessionId);
-    }
-
-    // --- Countdown ---
-    function startCountdown(){
-      const label = document.getElementById('refreshStatus');
-      function tick(){
-        if (!activeUntil) { label.textContent = 'Inactive'; return; }
-        const ms = activeUntil - new Date();
-        if (ms <= 0) { label.textContent = 'Expired'; return; }
-        const mins = Math.floor(ms/60000), secs = Math.floor((ms%60000)/1000);
-        label.textContent = `Active (${mins}m ${secs}s left)`;
-        requestAnimationFrame(tick);
-      }
-      tick();
-    }
-
     // --- Load responses (auto refresh only) ---
     function loadResponses(){
+      document.getElementById('refreshStatus').textContent =
+  'Refreshing...';
       google.script.run
         .withSuccessHandler(rows=>{
           const incoming = Array.isArray(rows) ? rows.filter(r => r != null) : [];
           const byId = new Map(incoming.map(r => [String(r.response_id), r]));
-
+          document.getElementById('refreshStatus').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
           // Merge into existing RESPONSES to keep local fresher edits
           RESPONSES = RESPONSES.map(local => {
             const rid = String(local.response_id);
@@ -911,12 +872,11 @@
             if (cardEl) resyncCardTagsUI(cardEl, r.tags);
           }
           // Small delay to let Sheets become consistent before resuming refresh
-          setTimeout(() => { WRITE_IN_FLIGHT = false; startAutoRefresh(); }, 600);
+          setTimeout(() => { WRITE_IN_FLIGHT = false;}, 600);
         })
         .withFailureHandler(err => {
           alert('Save failed: ' + (err && err.message ? err.message : err));
           WRITE_IN_FLIGHT = false;
-          startAutoRefresh();
         })
         .apiUpdateResponse(INSTRUCTOR_ID, responseId, { tags: next });
     };
@@ -998,12 +958,11 @@
             Object.assign(r, updatedRow);
           }
           // Small delay to let Sheets become consistent before resuming refresh
-          setTimeout(() => { WRITE_IN_FLIGHT = false; startAutoRefresh(); }, 600);
+          setTimeout(() => { WRITE_IN_FLIGHT = false; }, 600);
         })
         .withFailureHandler(err=>{
           alert('Save failed: ' + (err && err.message ? err.message : err));
           WRITE_IN_FLIGHT = false;
-          startAutoRefresh();
         })
         .apiUpdateResponse(INSTRUCTOR_ID, id, { pos_x: x, pos_y: y });
     }

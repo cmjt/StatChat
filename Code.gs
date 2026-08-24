@@ -12,7 +12,6 @@
  *  - Peer review assignments: self + 2 others (n=3).
  *  - Debug APIs for headers and counts.
  */
-
 // ===== CONFIG =====
 const SHEET_RESPONSES   = 'Responses';
 const SHEET_SESSIONS    = 'Sessions';
@@ -25,6 +24,7 @@ const SHEET_PEER_ASSIGNMENTS = 'PeerAssignments';
 // ===== PING =====
 function pingServer() { return { ok: true, msg: 'pong' }; }
 function ping() { return 'pong'; }
+
 
 // ===== SHEET HELPERS =====
 function getSheetByName(name) {
@@ -159,25 +159,12 @@ function getSession(session_id) {
   return null;
 }
 function apiGetSignedInIdentity() {
-  const email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return {
-      ok: false,
-      code: 'NO_EMAIL',
-      error: 'We couldn’t detect your University Google sign-in. Switch to your @aucklanduni.ac.nz account and reload.'
-    };
-  }
-  if (!/@aucklanduni\.ac\.nz$/i.test(email)) {
-    return {
-      ok: false,
-      code: 'WRONG_DOMAIN',
-      error: 'You are signed into Google with a non-UoA account. Please switch to @aucklanduni.ac.nz and reload.'
-    };
-  }
-  const upi = email.replace(/@.*$/, '');
-  return { ok: true, email, upi };
+  return {
+    ok: true,
+    email: '',
+    upi: ''
+  };
 }
-``
 
 function isSessionActive(session) {
   if (!session) return false;
@@ -273,14 +260,6 @@ function getAuthedEmail() {
     return '';
   }
 }
-/** Enforce domain. Throws if not in allowed domain. */
-function requireDomainEmailOrThrow(allowedDomain) {
-  const email = getAuthedEmail();
-  if (!email || !email.toLowerCase().endsWith('@' + allowedDomain.toLowerCase())) {
-    throw new Error('Unauthorized. Please use your institutional Google account.');
-  }
-  return email;
-}
 
 // ===== WEB ROUTES =====
 function doGet(e) {
@@ -288,8 +267,7 @@ function doGet(e) {
   const page = pageRaw.toLowerCase();
 
   if (page === 'student') {
-    // NEW: enforce domain & capture email
-    const email = requireDomainEmailOrThrow('aucklanduni.ac.nz');
+    const email = '';
 
     const t = HtmlService.createTemplateFromFile('student');
     t.inst = (e && e.parameter && e.parameter.inst) ? String(e.parameter.inst) : '';
@@ -368,7 +346,7 @@ function apiSubmitResponse(session_id, payload) {
   // Poll flags deprecated: always false
   const rowPayload = {
     session_id,
-    unique_id: String(payload.unique_id || ''),
+    reviewer_token: String(payload.reviewer_token || ''),
     response_text_original: text,
     response_text_edited: (profanity_flag === 'MASKED') ? response_text_masked : '',
     is_poll: 'FALSE',
@@ -420,7 +398,7 @@ function submitResponse(response_text, unique_id, class_access_code_unused, sess
     } else {
       return { ok:true, response_id: writeResponse({
         session_id,
-        unique_id: String(unique_id || ''),
+        reviewer_token: String(reviewer_token || ''),
         response_text_original: text,
         response_text_edited: '',
         is_poll: 'FALSE',
@@ -438,7 +416,7 @@ function submitResponse(response_text, unique_id, class_access_code_unused, sess
 
   const rowPayload = {
     session_id,
-    unique_id: String(unique_id || ''),
+    reviewer_token: String(reviewer_token || ''),
     response_text_original: text,
     response_text_edited: (profanity_flag === 'MASKED') ? response_text_masked : '',
     is_poll: 'FALSE',
@@ -701,7 +679,7 @@ function apiUpdateResponse(instructor_id, response_id, patch) {
 function apiExportCSV(instructor_id, session_id) {
   const rows = apiListResponsesByInstructor(instructor_id, session_id);
   const headers = Object.keys(rows[0] || {
-    response_id:'', session_id:'', timestamp:'', unique_id:'', response_text_original:'', response_text_edited:'',
+    response_id:'', session_id:'', timestamp:'', reviewer_token:'', response_text_original:'', response_text_edited:'',
     is_poll:'', poll_value_normalized:'', is_hidden:'', is_pinned:'', order_weight:'', profanity_flag:'', confidence:'', tags:'', phase_at_submit:''
   });
   const csv = [headers.join(',')].concat(
@@ -717,15 +695,15 @@ function apiExportCSV(instructor_id, session_id) {
 // ===== PEER REVIEW API =====
 
 /** Gate: has this reviewer submitted at least one response in this session? (non-hidden only) */
-function apiHasSubmitted(session_id, unique_id){
+function apiHasSubmitted(session_id, reviewer_token){
   const sh = getResponsesSheet();
   const { header: hdr, rows } = readTable(sh);
   const sCol = hdr.indexOf('session_id');
-  const uCol = hdr.indexOf('unique_id');
+  const uCol = hdr.indexOf('reviewer_token');
   const hidCol = hdr.indexOf('is_hidden');
-  if (sCol === -1 || uCol === -1) throw new Error('Missing session_id or unique_id columns in Responses.');
+  if (sCol === -1 || uCol === -1) throw new Error('Missing session_id or reviewer_token columns in Responses.');
   const targetS = String(session_id).trim().toLowerCase();
-  const targetU = String(unique_id).trim();
+  const targetU = String(reviewer_token).trim();
   const has = rows.some(r =>
     String(r[sCol]).trim().toLowerCase() === targetS &&
     String(r[uCol]).trim() === targetU &&
@@ -740,7 +718,7 @@ function apiListFeedbackByReviewer(session_id, reviewer_id){
   const { header: hdr, rows } = readTable(sh);
   const sCol = hdr.indexOf('session_id');
   const rCol = hdr.indexOf('response_id');
-  const uCol = hdr.indexOf('reviewer_id');
+  const uCol = hdr.indexOf('reviewer_token');
   const hCol = hdr.indexOf('is_hidden');
   if ([sCol,rCol,uCol,hCol].some(i=>i===-1)) throw new Error('Missing columns in PeerFeedback.');
   const targetS = String(session_id).trim().toLowerCase();
@@ -846,7 +824,7 @@ function apiAssignPeerTargets(session_id, reviewer_id, n_assign) {
   const shR = getResponsesSheet();
   const { header: hdr, rows } = readTable(shR);
   const idx = (name)=>{ const i = hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
-  const sCol = idx('session_id'), hidCol = idx('is_hidden'), uidCol = idx('unique_id'), idCol = idx('response_id'), tsCol = idx('timestamp');
+  const sCol = idx('session_id'), hidCol = idx('is_hidden'), uidCol = idx('reviewer_token'), idCol = idx('response_id'), tsCol = idx('timestamp');
 
   // Build candidate rows for this session (visible only)
   const all = rows
@@ -878,7 +856,7 @@ function apiAssignPeerTargets(session_id, reviewer_id, n_assign) {
   const shA = getPeerAssignmentsSheet();
   const { header: aHdr, rows: aRows } = readTable(shA);
   const aIdx = (name)=>{ const i=aHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerAssignments.`); return i; };
-  const aSCol=aIdx('session_id'), aUCol=aIdx('reviewer_id'), aRidCol=aIdx('response_id');
+  const aSCol=aIdx('session_id'), aUCol=aIdx('reviewer_token'), aRidCol=aIdx('response_id');
 
   const existing = aRows
     .filter(r => String(r[aSCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
@@ -954,7 +932,7 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_id, feedback_te
       case 'feedback_id':  return nextId;
       case 'session_id':   return session_id;
       case 'response_id':  return response_id;
-      case 'reviewer_id':  return String(reviewer_id||'');
+      case 'reviewer_token':  return String(reviewer_id||'');
       case 'feedback_text':return outText;
       case 'timestamp':    return new Date();
       case 'is_hidden':    return 'FALSE';
@@ -1289,7 +1267,7 @@ function apiDebugSessionAndCounts(instructor_id, session_id){
 function doPost(e) {
   try {
     // NEW: enforce domain (if you still POST through Canvas/other launcher)
-    const email = requireDomainEmailOrThrow('aucklanduni.ac.nz');
+    const email = '';
 
     const params = (e && e.parameter) ? e.parameter : {};
 
