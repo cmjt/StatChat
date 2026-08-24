@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Class Response</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body, button, input, select, textarea { font-family: 'Inter', sans-serif;}
+        :root {
+      --uoa-blue: #15538A;
+      --uoa-blue-hover: #1c669f;
+      --danger: #b42318;
+      --danger-hover: #8f1d14;
+      --border: #d0d5dd;
+      --text-light: #ffffff;
+    }
+
+    /* Layout */
+    .view-toggle {
+      margin-left: 12px;
+      display: inline-flex;
+      gap: 6px;
+    }
+
+    /* Base button */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.8rem;
+      font-size: 1.5rem;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      border-radius: 999px; /* pill shape */
+      border: 1px solid transparent;
+      cursor: pointer;
+      line-height: 1;
+      background: none;
+      transition: background-color 0.15s ease, transform 0.05s ease;
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn:focus-visible {
+      outline: 3px solid #84c5f4;
+      outline-offset: 2px;
+    }
+
+    /* View buttons */
+    .btn-view {
+      background-color: var(--uoa-blue);
+      color: var(--text-light);
+    }
+
+    .btn-view:hover {
+      background-color: var(--uoa-blue-hover);
+    }
+    #toggleBtn {
+      cursor: pointer;
+      border: 1px solid #15538A; /* UoA blue */
+      border-radius: 4px;
+      background-color: #ffffff;
+      color: #15538A;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    #toggleBtn:hover {
+      background-color: #15538A;
+      color: #ffffff;
+    }
+
+    #collapsible {
+      transition: all 0.2s ease;
+    }
+    :root { color-scheme: light dark; }
+    body { margin: 0; padding: 16px; }
+    .container { max-width: 720px; margin: 0 auto; }
+    h2 { margin: 0 0 12px; }
+    .banner { margin:12px 0; padding:8px 12px; border:3px solid #cbd5e1; border-radius:6px; background:#f8fafc;color: #475569;font-size: 0.9rem; }
+    .banner strong {font-weight: 600;color: #334155;}
+    @media (prefers-color-scheme: dark) {
+      .banner {background: #111827; border-left: 3px solid #374151; color: #9ca3af; }
+      .banner strong {color: #e5e7eb;}
+      }
+    .row { display:flex; gap:10px; align-items:center; }
+    label { font-weight: 600; }
+    input[type="text"], textarea, input[type="range"], button { padding:8px; font: inherit; }
+    input[type="text"] { width: 100%; }
+    textarea { width: 100%; min-height: 160px; resize: vertical; }
+    button { padding: 10px 14px; border: 1px solid #ccc; border-radius: 6px; background: #f0f0f0; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .small { color:#666; font-size: 0.92rem; }
+    .status { margin-left: 12px; color:#666; }
+    .countdown { font-weight:600; }
+    .ok { color: #0a7; }
+    .err { color: #c00; }
+    .card { border:1px solid #ddd; border-radius:8px; padding:12px; background:#fff; margin-top:8px; }
+     .conf-btn {
+      padding: 0.45rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #15538A; /* UoA blue */
+      background-color: #ffffff;
+      color: #15538A;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    /* Only fix box-sizing for the peer-review textareas inside assignment cards */
+    #assignments .card textarea {
+      box-sizing: border-box; /* ensures padding + border are included in the width */
+      width: 100%;
+      max-width: 100%;
+      display: block;
+      margin: 0;
+    }
+    /* Optional safety nets */
+    #assignments .card { overflow: hidden; }               /* prevent sub-pixel bleed */
+    #assignments .card .small { overflow-wrap: anywhere; } /* long words/URLs won’t push width */
+        .conf-btn:hover {
+          background-color: #15538A;
+          color: #ffffff;
+    }
+
+    .conf-btn.active {
+      background-color: #15538A;
+      color: #ffffff;
+    }
+    .toast { margin-top:8px; padding:8px 12px; border:1px solid #cfe9d8; background:#eaf7ef; color:#155d46; border-radius:6px; display:none; }
+    .completed { opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Share your response</h2>
+
+    <div class="banner" id="infoBanner">
+      <div>
+        <strong>Note:</strong> By submitting, you agree that your response may be shown anonymously during class discussion and saved for course-related use.
+      </div>
+      <div class="small" style="margin-top:8px;">
+        <span><b>Instructor:</b> <span id="instLabel">—</span></span>
+        &nbsp;|&nbsp;
+        <span><b>Session:</b> <span id="sessionLabel">—</span></span>
+        &nbsp;|&nbsp;
+        <span><b>Status:</b> <span id="sessionStatus">Resolving…</span></span>
+         <!--&nbsp;|&nbsp;
+        <span class="countdown"><span id="countdown">—</span></span>-->
+      </div>
+      <div id="phaseToast" class="toast">Peer review is now open.</div>
+    </div>
+
+    <!-- Name/ID -->
+    <div class="row" style="margin-top:10px;">
+      <label for="uniqueId" style="min-width:120px;">Your name / ID</label>
+      <input id="uniqueId" type="text" placeholder="e.g., Student ID" autocomplete="name">
+    </div>
+
+    <!-- Response -->
+    <div style="margin-top:10px;">
+      <label for="responseText">Your response</label>
+      <textarea id="responseText" placeholder="Write your answer…"></textarea>
+      <div class="small" id="wordCount" style="margin-top:6px;">Words: 0</div>
+    </div>
+    
+    <!-- Confidence buttons -->
+    <div style="margin-top:10px;">
+      <button id="toggleBtn" style="font-weight:bold;">+</button>
+      <div id="collapsible" style="display:none; margin-top:10px; padding:6px; border:1px solid #ccc; border-radius:4px;">
+        <label>Confidence level</label>
+        <input type="hidden" id="confidence" value="0">
+        <div class="confidence-buttons" style="display:flex; gap:6px; margin-top:4px;">
+          <button type="button" class="conf-btn" data-value="0">N/A</button>
+          <button type="button" class="conf-btn" data-value="1">1</button>
+          <button type="button" class="conf-btn" data-value="2">2</button>
+          <button type="button" class="conf-btn" data-value="3">3</button>
+          <button type="button" class="conf-btn" data-value="4">4</button>
+          <button type="button" class="conf-btn" data-value="5">5</button>
+        </div>
+
+        <div style="margin-top:4px;">
+          Selected: <span id="confVal">...</span>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Submit -->
+    <div style="margin-top:12px;">
+      <button id="submitBtn" onclick="submitResponse()" class="btn btn-view" aria-label="Submit" title="Submit"disabled>➤<span class="btn-label">Submit</span></button>
+      <!-- Review navigation button kept hidden; students need not navigate away -->
+      <button id="reviewBtn" style="margin-left:8px; display:none;" onclick="goToReview()">Peer review (projector)</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <!-- Inline Peer Review Panel -->
+    <div id="reviewPanel" class="banner" style="display:none; margin-top:12px;">
+      <div><strong>Peer review</strong> Remember that everyone is doing their best. Provide constructive comments on others' work, and reflect honestly and thoughtfully on your own work.</div>
+      <div id="assignments"></div>
+
+      <!-- Download row appears when all assigned reviews are submitted -->
+      <!--<div id="peerDownloadRow" style="margin-top:8px; display:none;">
+        <button onclick="downloadPeerCsv()">Download anonymised CSV</button>
+        <span id="dlStatus" class="status"></span>
+      </div>-->
+    </div>
+  </div>
+
+  <script>
+    // --- State ---
+    let INSTRUCTOR_ID = '';
+    let SESSION_ID = '';
+    let ACTIVE_UNTIL = null;
+    let CURRENT_PHASE = 'writing';
+    let LAST_PHASE = 'writing';
+
+    const SERVER_INST = '<?= inst ?>';
+    const SERVER_EXEC = '<?= exec ?>';
+
+    // Static peer view: one-time assignments + cache
+    let ASSIGNMENTS_LOADED = false;
+    let ASSIGNED_IDS = [];
+
+    // Auto-fill unique ID from signed-in account and lock the field
+    (function prefillUniqueIdFromWorkspace() {
+      // Disable submit until we know who this is
+      const submitBtn = document.getElementById('submitBtn');
+      if (submitBtn) submitBtn.disabled = true;
+
+      // Don’t proceed unless we are in Apps Script
+      if (!(window.google && google.script && google.script.run)) return;
+
+      const input = document.getElementById('uniqueId');
+      const label = document.querySelector('label[for="uniqueId"]');
+      const status = document.getElementById('status');
+
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (res && res.ok) {
+            // Prefer UPI as the unique identifier; you can also switch to res.email if needed
+            if (input) {
+              input.value = res.upi || res.email || '';
+              input.readOnly = true;              // lock it
+              input.setAttribute('aria-readonly', 'true');
+            }
+            if (label) label.textContent = 'Signed in as';
+            if (submitBtn) submitBtn.disabled = false; // now safe to submit
+            if (CURRENT_PHASE === 'review' && !ASSIGNMENTS_LOADED) {try { maybeLoadAssignments(); } catch (e) {}}
+          } else {
+            // If domain sign-in fails, block submission and show a friendly message
+            if (submitBtn) submitBtn.disabled = true;
+            if (status) {
+              status.textContent = (res && res.error)
+                ? res.error
+                : 'Sign-in required with @aucklanduni.ac.nz.';
+              status.className = 'status err';
+            }
+          }
+        })
+        .withFailureHandler(function (err) {
+          if (submitBtn) submitBtn.disabled = true;
+          if (status) {
+            status.textContent = 'Could not verify your sign-in. Please reload or try again.';
+            status.className = 'status err';
+          }
+        })
+        .apiGetSignedInIdentity();
+    })();
+    
+    function normalizeSearch(raw){
+      return String(raw || '').replace(/&amp;amp;amp;amp;/g, '&');
+    }
+    function getParam(name){
+      const params = new URLSearchParams(normalizeSearch(location.search));
+      return params.get(name);
+    }
+    function inAppsScript(){ return !!(window.google && google.script && google.script.run); }
+    function setStatus(msg, isError=false){
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status ' + (isError ? 'err' : 'ok');
+    }
+    function countWords(s){
+      return String(s||'').trim().split(/\s+/).filter(Boolean).length;
+    }
+    document.getElementById('responseText').addEventListener('input', () => {
+      document.getElementById('wordCount').textContent =
+        `Words: ${countWords(document.getElementById('responseText').value)}`;
+    });
+
+    function showPhaseToast(){
+      const el = document.getElementById('phaseToast');
+      if (!el) return;
+      el.style.display = 'block';
+    }
+
+    function applyPhaseUI(){
+      const textEl = document.getElementById('responseText');
+      const submitBtn = document.getElementById('submitBtn');
+      const reviewEl = document.getElementById('reviewPanel');
+      const toastEl  = document.getElementById('phaseToast');
+
+      if (CURRENT_PHASE === 'review') {
+        textEl.placeholder = 'Peer review is active. Writing is temporarily disabled.';
+        submitBtn.disabled = true;          // disable writing
+        textEl.disabled = true;             // prevent editing while review active
+        reviewEl.style.display = 'block';   // show inline panel
+        maybeLoadAssignments();             // one-time load
+        if (toastEl) toastEl.style.display = 'block';
+      } else { // writing
+        textEl.placeholder = 'Write your answer…';
+        submitBtn.disabled = false;
+        textEl.disabled = false;
+        reviewEl.style.display = 'none';
+      }
+    }
+
+    function resolveSessionAndPhase(){
+      // If we are already in review and assignments loaded, do nothing (static view)
+      if (CURRENT_PHASE === 'review' && ASSIGNMENTS_LOADED) return;
+
+      INSTRUCTOR_ID = (getParam('inst') || SERVER_INST || '').trim();
+      document.getElementById('instLabel').textContent = INSTRUCTOR_ID || '—';
+
+      if (!INSTRUCTOR_ID) {
+        document.getElementById('sessionStatus').textContent = 'Error';
+        setStatus('Missing ?inst=... (instructor id). Use the official link.', true);
+        return;
+      }
+      if (!inAppsScript()) {
+        document.getElementById('sessionStatus').textContent = 'Error';
+        setStatus('Please open the official web app link (Apps Script HtmlService).', true);
+        return;
+      }
+
+      document.getElementById('sessionStatus').textContent = 'Resolving…';
+      google.script.run
+        .withSuccessHandler(res=>{
+          if (!res || !res.active || !res.session_id) {
+            // No active writing session — try peer-review fallback
+            google.script.run
+              .withSuccessHandler(pr => {
+                if (pr && pr.ok && pr.session_id) {
+                  SESSION_ID = pr.session_id;
+                  ACTIVE_UNTIL = null;
+                  LAST_PHASE = CURRENT_PHASE;
+                  CURRENT_PHASE = 'review';
+                  document.getElementById('sessionLabel').textContent = SESSION_ID;
+                  document.getElementById('sessionStatus').textContent = 'Peer review';
+                  applyPhaseUI();
+                  showPhaseToast();
+                } else {
+                  document.getElementById('sessionStatus').textContent = 'No active session';
+                  setStatus('No active session right now. Please try again later.', true);
+                }
+              })
+              .withFailureHandler(err => {
+                document.getElementById('sessionStatus').textContent = 'No active session';
+                setStatus('No active session right now. Please try again later.', true);
+              })
+              .apiGetOpenPeerSessionForInstructor(INSTRUCTOR_ID);
+            return;
+          }
+          SESSION_ID = res.session_id;
+          ACTIVE_UNTIL = res.active_until ? new Date(res.active_until) : null;
+          LAST_PHASE = CURRENT_PHASE;
+          CURRENT_PHASE = String(res.phase || 'writing').toLowerCase();
+
+          document.getElementById('sessionLabel').textContent = SESSION_ID;
+          document.getElementById('sessionStatus').textContent = 'Active';
+
+          if (ACTIVE_UNTIL) startCountdown();
+          applyPhaseUI();
+
+          // Show toast when switching into review
+          if (LAST_PHASE !== 'review' && CURRENT_PHASE === 'review') {
+            showPhaseToast();
+          }
+        })
+        .withFailureHandler(err=>{
+          document.getElementById('sessionStatus').textContent = 'Error';
+          setStatus(String(err), true);
+        })
+        .apiGetActiveSessionForInstructor(INSTRUCTOR_ID);
+    }
+
+    (function init(){ resolveSessionAndPhase(); })();
+    // No polling or visibility-change listeners (static view after initial load)
+
+    function startCountdown(){
+      const el = document.getElementById('countdown');
+      function tick(){
+        if (!ACTIVE_UNTIL) { el.textContent = '—'; return; }
+        const ms = ACTIVE_UNTIL - new Date();
+        if (ms <= 0) { el.textContent = 'Expired'; document.getElementById('submitBtn').disabled = true; return; }
+        const mins = Math.floor(ms/60000);
+        const secs = Math.floor((ms%60000)/1000);
+        el.textContent = `${mins}m ${secs}s left`;
+        requestAnimationFrame(tick);
+      }
+      tick();
+    }
+    const toggleBtn = document.getElementById('toggleBtn');
+    const collapsible = document.getElementById('collapsible');
+
+    toggleBtn.addEventListener('click', () => {
+      if (collapsible.style.display === 'none') {
+        collapsible.style.display = 'block';
+        toggleBtn.textContent = '−'; // change + to −
+      } else {
+        collapsible.style.display = 'none';
+        toggleBtn.textContent = '+'; // change − back to +
+      }
+    });
+    document.querySelectorAll('.conf-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = Number(btn.dataset.value);
+        selectedConfidence = val;
+        // Update hidden input so workflow still works
+        document.getElementById('confidence').value = val;
+        document.getElementById('confVal').textContent = val === 0 ? "N/A" : val;
+        document.querySelectorAll('.conf-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+    function submitResponse(){
+      const nameOrId = document.getElementById('uniqueId').value.trim();
+      const text     = document.getElementById('responseText').value.trim();
+      const conf     = Number(document.getElementById('confidence').value);
+
+      if (CURRENT_PHASE === 'review') { setStatus('Writing is disabled during peer review.', true); return; }
+      if (!nameOrId) { setStatus('Please enter your name/ID.', true); return; }
+      if (!text)     { setStatus('Please enter a response.', true); return; }
+      if (!SESSION_ID) { setStatus('No active session. Please try again later.', true); return; }
+
+      setStatus('Submitting…');
+      document.getElementById('submitBtn').disabled = true;
+
+      const payload = { response_text_original: text, unique_id: nameOrId, confidence: conf, is_poll: false, poll_value_normalized: '' };
+
+      google.script.run
+        .withSuccessHandler(res=>{
+          if (res && res.ok) {
+            document.getElementById('responseText').value = '';
+            setStatus('Submitted. Thank you!', false);
+            try { sessionStorage.setItem('unique_id', nameOrId); } catch(e){}
+            const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
+          } else {
+            setStatus(res && res.error ? res.error : 'Submission failed.', true);
+          }
+          document.getElementById('submitBtn').disabled = false;
+        })
+        .withFailureHandler(err=>{
+          google.script.run
+            .withSuccessHandler(res2=>{
+              if (res2 && res2.ok) {
+                document.getElementById('responseText').value = '';
+                setStatus('Submitted. Thank you!', false);
+                try { sessionStorage.setItem('unique_id', nameOrId); } catch(e){}
+                const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
+              } else {
+                setStatus(res2 && res2.error ? res2.error : 'Submission failed.', true);
+              }
+              document.getElementById('submitBtn').disabled = false;
+            })
+            .withFailureHandler(err2=>{
+              setStatus(String(err2), true);
+              document.getElementById('submitBtn').disabled = false;
+            })
+            .submitResponse(text, nameOrId, '', SESSION_ID, INSTRUCTOR_ID, conf);
+        })
+        .apiSubmitResponse(SESSION_ID, payload);
+    }
+
+    // Inline peer review
+    function maybeLoadAssignments(){
+      const uid = (document.getElementById('uniqueId').value || sessionStorage.getItem('unique_id') || '').trim();
+      const reviewEl = document.getElementById('reviewPanel');
+      if (!uid || !SESSION_ID) { reviewEl.style.display = 'none'; return; }
+
+      // Only gate access once; do not rebuild if already loaded
+      if (ASSIGNMENTS_LOADED) return;
+
+      google.script.run
+        .withSuccessHandler(function(hasRes){
+          if (hasRes && hasRes.ok && hasRes.has) {
+            reviewEl.style.display = 'block';
+            loadAssignedReviewTasks(uid);
+          } else {
+            reviewEl.style.display = 'none';
+            setStatus('Submit at least one response to participate in peer review.', true);
+          }
+        })
+        .withFailureHandler(err=>{ setStatus('Check failed: ' + (err && err.message ? err.message : err), true); })
+        .apiHasSubmitted(SESSION_ID, uid);
+    }
+
+    function loadAssignedReviewTasks(uid){
+      google.script.run
+        .withSuccessHandler(function(assign){
+          const cont = document.getElementById('assignments');
+          cont.innerHTML = '';
+          const ids = (assign && assign.ok && Array.isArray(assign.assigned)) ? assign.assigned : [];
+          if (!ids.length){ cont.innerHTML = '<div class="small">No assignments yet…</div>'; return; }
+
+          // fetch completed list to gray out/disable
+          google.script.run
+            .withSuccessHandler(function(done){
+              const completed = (done && done.ok && Array.isArray(done.completed)) ? new Set(done.completed) : new Set();
+
+              ids.forEach(rid=>{
+                const card = document.createElement('div'); card.className='card';
+                const isDone = completed.has(String(rid));
+                card.classList.toggle('completed', isDone);
+                card.innerHTML = `
+                  <div><b>Response #${rid}</b></div>
+                  <div id="snippet_${rid}" class="small" style="margin:6px 0; color:#444;">Loading text…</div>
+                  <textarea id="fb_${rid}" placeholder="Write feedback that is constructive, respectful, and supports shared understanding." rows="3" ${isDone ? 'disabled' : ''}></textarea>
+                  <div style="margin-top:8px;">
+                    <button id="btn_${rid}" onclick="submitFeedback('${rid}')" ${isDone ? 'disabled' : ''}>${isDone ? 'Submitted' : 'Submit feedback'}</button>
+                  </div>
+                `;
+                cont.appendChild(card);
+
+                // Fetch and inject the submission text for this assignment
+                google.script.run
+                  .withSuccessHandler(res => {
+                    const el = document.getElementById('snippet_' + rid);
+                    if (!el) return;
+                    if (res && res.ok && typeof res.text === 'string') {
+                      const safe = String(res.text).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+                      el.innerHTML = safe || '<span class="small" style="color:#888;">(no text)</span>';
+                    } else {
+                      el.innerHTML = '<span class="small err">Text unavailable.</span>';
+                    }
+                  })
+                  .withFailureHandler(err => {
+                    const el = document.getElementById('snippet_' + rid);
+                    if (el) el.innerHTML = '<span class="small err">Failed to load text.</span>';
+                  })
+                  .apiGetResponseText(SESSION_ID, rid);
+              });
+
+              // After populating cards, show download CSV if all assigned are completed
+              const dlRow = document.getElementById('peerDownloadRow');
+              if (dlRow) {
+                const allDone = ids.length > 0 && ids.every(id => completed.has(String(id)));
+                dlRow.style.display = allDone ? 'block' : 'none';
+              }
+
+              // Cache & lock: prevent future rebuilds
+              ASSIGNMENTS_LOADED = true;
+              ASSIGNED_IDS = ids.slice();
+            })
+            .withFailureHandler(err=>{ document.getElementById('assignments').innerHTML = '<div class="small err">Error loading completed status.</div>'; })
+            .apiListFeedbackByReviewer(SESSION_ID, uid);
+        })
+        .withFailureHandler(err=>{ document.getElementById('assignments').innerHTML = '<div class="small err">Error loading assignments.</div>'; })
+        .apiAssignPeerTargets(SESSION_ID, uid, 3); // self + 2 others
+    }
+
+    function submitFeedback(rid){
+      const uid = (document.getElementById('uniqueId').value || sessionStorage.getItem('unique_id') || '').trim();
+      const ta = document.getElementById('fb_' + rid);
+      const txt = ta ? (ta.value || '').trim() : '';
+      const btn = document.getElementById('btn_' + rid);
+      if (!uid || !SESSION_ID) { setStatus('Missing session or ID.', true); return; }
+      if (!txt) { setStatus('Write feedback.', true); return; }
+
+      google.script.run
+        .withSuccessHandler(function(res){
+          if (res && res.ok) {
+            setStatus('Feedback submitted.', false);
+
+            // Local-only UI update (no rebuild)
+            if (ta) { ta.value = ''; ta.disabled = true; }
+            if (btn) { btn.disabled = true; btn.textContent = 'Submitted'; }
+            const card = ta?.closest('.card'); if (card) card.classList.add('completed');
+
+            // Check if all assigned are complete to show CSV
+            google.script.run
+              .withSuccessHandler(function(done){
+                const completed = (done && done.ok && Array.isArray(done.completed)) ? new Set(done.completed) : new Set();
+                const dlRow = document.getElementById('peerDownloadRow');
+                if (dlRow && ASSIGNED_IDS.length > 0) {
+                  const allDone = ASSIGNED_IDS.every(id => completed.has(String(id)));
+                  dlRow.style.display = allDone ? 'block' : 'none';
+                }
+              })
+              .withFailureHandler(_ => { /* ignore */ })
+              .apiListFeedbackByReviewer(SESSION_ID, uid);
+
+          } else {
+            setStatus((res && res.error) || 'Feedback failed.', true);
+          }
+        })
+        .withFailureHandler(err=>{ setStatus('Feedback failed: ' + (err && err.message ? err.message : err), true); })
+        .apiSubmitPeerFeedback(SESSION_ID, rid, uid, txt);
+    }
+
+    function downloadPeerCsv(){
+      const statusEl = document.getElementById('dlStatus');
+      statusEl.textContent = 'Preparing CSV…';
+      statusEl.className = 'status';
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.ok || !res.base64) {
+            statusEl.textContent = (res && res.error) ? res.error : 'Download failed.';
+            statusEl.className = 'status err';
+            return;
+          }
+          const a = document.createElement('a');
+          a.href = 'data:text/csv;base64,' + res.base64;
+          a.download = res.filename || 'peer_review_set.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          statusEl.textContent = 'CSV downloaded.';
+          statusEl.className = 'status ok';
+        })
+        .withFailureHandler(err => {
+          statusEl.textContent = 'Download failed: ' + (err && err.message ? err.message : err);
+          statusEl.className = 'status err';
+        })
+        .apiGetPeerCsv(SESSION_ID);
+    }
+
+    function goToReview(){
+      const u = new URL(location.href);
+      const inst = INSTRUCTOR_ID || u.searchParams.get('inst') || '';
+      if (!inst) { alert('Missing instructor ID. Please use the official link.'); return; }
+      const base = new URL(SERVER_EXEC || `${location.origin}${location.pathname}`);
+      base.searchParams.set('page', 'review'); base.searchParams.set('inst', inst);
+      location.assign(base.toString());
+    }
+  </script>
+</body>
+</html>

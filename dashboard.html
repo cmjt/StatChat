@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Instructor Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body, button, input, select, textarea { font-family: 'Inter', sans-serif;}
+    body { margin: 0; }
+    header { display: flex; gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid #ddd; }
+    .list { padding: 12px; display: grid; gap: 8px; }
+    :root {
+      --uoa-blue: #15538A;
+      --uoa-blue-hover: #1c669f;
+      --danger: #b42318;
+      --danger-hover: #8f1d14;
+      --border: #d0d5dd;
+      --text-light: #ffffff;
+    }
+
+    /* Layout */
+    .view-toggle { margin-left: 12px; display: inline-flex; gap: 6px; }
+
+    /* Base button */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.8rem;
+      font-size: 0.9rem;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      border-radius: 999px; /* pill shape */
+      border: 1px solid transparent;
+      cursor: pointer;
+      line-height: 1;
+      background: none;
+      transition: background-color 0.15s ease, transform 0.05s ease;
+    }
+
+    .btn:active { transform: translateY(1px); }
+    .btn:focus-visible { outline: 3px solid #84c5f4; outline-offset: 2px; }
+
+    /* Stop (danger) */
+    .btn-stop { background-color: var(--danger); color: var(--text-light); }
+    .btn-stop:hover { background-color: var(--danger-hover); }
+
+    /* View buttons */
+    .btn-view { background-color: var(--uoa-blue); color: var(--text-light); }
+    .btn-view:hover { background-color: var(--uoa-blue-hover); }
+
+    /* Board container */
+    #listView.board { position: relative; display: grid !important; min-height: 70vh; padding: 12px; background: #fff; overflow: auto; align-items: start; align-content: start;}
+
+    /* Cards */
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; background: #fff; }
+    .card.boardItem { position: absolute; width: calc(100% / var(--cols, 3) - 16px); box-sizing: border-box; }
+    .hidden { opacity: 0.4; }
+    .pinned { border-color: #0a7; }
+
+    .rowTop { display: flex; justify-content: space-between; align-items: center; }
+    .leftTop { display: inline-flex; align-items: center; gap: 8px; }
+    .drag { cursor: grab; user-select: none; font-weight: bold; }
+    .drag:active { cursor: grabbing; }
+
+    .loginCard { padding:12px; max-width:560px; border:1px solid #eee; border-radius:8px; background:#fafafa; margin: 12px; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .panelTitle { font-weight:600; margin-bottom:6px; }
+
+    /* Tags */
+    .tagRow { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .tagBtn { padding:4px 10px; border:1px solid #ddd; border-radius:12px; background:#f7f7f7; cursor:pointer; }
+    .tagBtn.selected { background:#0a7; color:#fff; border-color:#0a7; }
+    .tagGroupLabel { font-weight:600; margin-right:4px; }
+    .tagSummary { margin-left:auto; color:#666; }
+
+    /* Confidence badge */
+    .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:0.78rem; line-height:1.4; margin-left:8px; border:1px solid #ddd; background:#fafafa; }
+    .badge.c1 { 
+      background: rgba(219, 234, 254, 0.7);   /* #dbeafe */
+      color: #1e3a8a;
+      border: 1px solid rgba(147, 197, 253, 0.8);
+    }
+
+    .badge.c2 { 
+      background: rgba(147, 197, 253, 0.65);  /* #93c5fd */
+      color: #1d4ed8;
+      border: 1px solid rgba(59, 130, 246, 0.8);
+    }
+
+    .badge.c3 { 
+      background: rgba(59, 130, 246, 0.6);    /* #3b82f6 */
+      color: #ffffff;
+      border: 1px solid rgba(29, 78, 216, 0.85);
+    }
+
+    .badge.c4 { 
+      background: rgba(29, 78, 216, 0.75);    /* #1d4ed8 */
+      color: #ffffff;
+      border: 1px solid rgba(30, 58, 138, 0.9);
+    }
+
+    .badge.c5 { 
+      background: rgba(30, 58, 138, 0.9);     /* #1e3a8a */
+      color: #ffffff;
+      border: 1px solid #1e3a8a;
+    }
+    /* Delete button */
+    .pinBtn { cursor:pointer; background:none; border:none; padding:2px 6px; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
+    .pinBtn svg{ width:18px; height:18px; stroke:#666; fill:none; stroke-width:1.8; transition:all 140ms ease; }
+    .pinBtn:focus-visible{ outline:2px solid #60a5fa; border-radius:4px; }
+
+    /* Debug chip */
+    .debugChip { margin-left: 8px; color:#666; font-size:0.85rem; }
+
+    /* Poll mode layout */
+    #dashView.mode-poll #listView { display: none !important; }
+    #dashView.mode-poll #confidencePanel { margin-top: 0; }
+
+    /* Peer feedback text wrapping */
+    .peerFbItem { white-space: pre-wrap; }
+    /* Review quality tags (per review) */
+    .revTagRow {
+      margin-top: 6px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .revTagBtn {
+      padding: 3px 8px;
+      border: 1px solid var(--border, #ddd);
+      border-radius: 12px;
+      background: #f7f7f7;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .revTagBtn.selected {
+      background: var(--uoa-blue, #15538A);
+      color: #fff;
+      border-color: var(--uoa-blue, #15538A);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN VIEW -->
+  <div id="loginView">
+    <h2 style="margin:12px;">Instructor Dashboard</h2>
+    <div class="loginCard">
+      <form id="startForm" onsubmit="handleLoginAndStart(); return false;">
+        <!-- Instructor login -->
+        <div class="row">
+          <label style="min-width:160px;">Instructor ID</label>
+          <input id="inst" placeholder="e.g., cjon911" style="flex:1;" autocomplete="username">
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:160px;">Password</label>
+          <input id="instPw" type="password" placeholder="••••••••" style="flex:1;" autocomplete="current-password">
+        </div>
+
+        <!-- Session -->
+        <div class="row" style="margin-top:12px;">
+          <label style="min-width:160px;">Session ID</label>
+          <input id="newSessionId" placeholder="e.g., week_01_lec_02" style="flex:1;">
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:160px;">Duration</label>
+          <select id="sessionDuration">
+            <option value="10">10 mins</option>
+            <option value="30">30 mins</option>
+            <option value="60" selected>60 mins</option>
+            <option value="120">120 mins</option>
+          </select>
+        </div>
+
+        <div style="margin-top:12px;">
+          <button id="startBtn" type="submit" class="btn btn-view" aria-label="Start session" title="Start session">🔓<span class="btn-label">Open</span></button>
+          <span id="startMsg" style="margin-left:10px;color:#0a7;"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- DASHBOARD VIEW -->
+  <div id="dashView" style="display:none;">
+    <header>
+      <span><b>Session:</b> <span id="sessionLabel">—</span></span>
+      <label style="margin-left:12px;">Status: <span id="refreshStatus">Inactive</span></label>
+      <button class="btn btn-stop" onclick="stopSession()" aria-label="End session" title="End session">
+        🛑 <span class="btn-label">Stop</span>
+      </button>
+
+      <!-- View toggles -->
+      <span class="view-toggle">
+        <button type="button" class="btn btn-view" onclick="setViewCards()" aria-label="Card view" title="Card view">
+          📝 <span class="btn-label">Writing</span>
+        </button>
+        <button type="button" class="btn btn-view" onclick="setViewPoll()" aria-label="Poll view" title="Poll view">
+          📊 <span class="btn-label">Poll</span>
+        </button>
+      </span>
+
+      <span style="margin-left:12px;">
+        <label for="historyMins" style="margin-right:6px;">Show last</label>
+        <input id="historyMins" type="number" min="0" value="5" style="width:80px;" oninput="setHistoryWindow()" />
+        <span>mins</span>
+      </span>
+
+      <!-- Peer review controls -->
+      <span style="margin-left:12px;">
+        <button type="button" class="btn btn-view" onclick="openPeerReview()" aria-label="Peer review" title="Peer review">👥<span class="btn-label">Peer review</span></button>
+        <label for="peerK" style="margin-right:6px;">Reviews per student</label>
+        <input id="peerK" type="number" min="1" value="2" style="width:64px;">
+        <span id="peerStatus" class="debugChip"></span>
+      </span>
+
+      <!-- <span id="debugChip" class="debugChip"></span> -->
+    </header>
+    
+    <!-- Poll (first-word tally) -->
+    <div id="pollPanel" class="list" style="padding:12px; border-top:1px solid #eee; display:none;">
+      <div class="panelTitle">Poll results</div>
+      <canvas id="pollChart" width="600" height="240" style="max-width:100%;"></canvas>
+    </div>
+
+    <!-- Board for responses -->
+    <div id="listView" class="list board"></div>
+
+    <!-- Confidence bar chart -->
+    <div id="confidencePanel" class="list" style="display:none;padding:12px; border-top:1px solid #eee;">
+      <div class="panelTitle">Class confidence level</div>
+      <canvas id="confidenceChart" width="600" height="240" style="max-width: 100%;"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // --- State ---
+    let INSTRUCTOR_ID = '';
+    let currentSessionId = '';
+    let activeUntil = null;
+
+    let RESPONSES = [];
+    let CURRENT_PHASE = 'writing';
+    let HISTORY_WINDOW_MINS = 5; // local filter only
+
+    // View mode: 'cards' (default) or 'poll'
+    let DASH_VIEW_MODE = 'cards';
+
+    // 🔒 Write-in-flight flag + per-row local write timestamps
+    let WRITE_IN_FLIGHT = false;
+    const TAG_WRITE_TS = Object.create(null); // { response_id: unix_ms_of_local_tag_write }
+    const POS_WRITE_TS = Object.create(null); // { response_id: unix_ms_of_local_pos_write }
+    const COLLAPSE_STATE = {}; // tags area open/closed per response
+    const REVIEWS_COLLAPSE_STATE = Object.create(null); // { [response_id]: true=open, false/undefined=closed }
+
+    // Batched peer feedback cache keyed by response_id
+    let FEEDBACK_BY_RESPONSE = {}; // { [response_id]: { count, items:[{text,timestamp}] } }
+    // Local override cache for review quality, to prevent UI from reverting on refresh
+    // Shape: { [response_id]: { [feedback_key]: { quality: string, ts: number } } }
+    const LOCAL_REVIEW_QUALITY = Object.create(null);
+
+    function setViewPoll(){
+      DASH_VIEW_MODE = 'poll';
+      const dashView = document.getElementById('dashView');
+      const listView = document.getElementById('listView');
+      const pollPanel = document.getElementById('pollPanel');
+      dashView.classList.add('mode-poll');
+      listView.style.display = 'none';
+      pollPanel.style.display = 'block';
+      render();
+      renderConfidence();
+      bumpDebugChip();
+    }
+
+    function setViewCards(){
+      DASH_VIEW_MODE = 'cards';
+      const dashView = document.getElementById('dashView');
+      const listView = document.getElementById('listView');
+      const pollPanel = document.getElementById('pollPanel');
+      dashView.classList.remove('mode-poll');
+      listView.style.display = 'grid';
+      pollPanel.style.display = 'none';
+      render();
+      renderConfidence();
+      bumpDebugChip();
+    }
+
+    // Auto refresh timer (every 5s)
+    let refreshTimer = null;
+    const autoRefreshSeconds = 5;
+    function startAutoRefresh(){ stopAutoRefresh(); refreshTimer = setInterval(loadResponses, autoRefreshSeconds * 1000); }
+    function stopAutoRefresh(){ if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } }
+
+    // Tag groups
+    const PERFORMANCE_TAGS = ['Outstanding','Strong','Developing','Emerging','Incomplete'];
+    const REASON_TAGS      = ['Insightful','Vague','Unclear','Off-topic','Inaccurate'];
+    // Review quality scale (exclusive)
+    const REVIEW_QUALITY = ['Unsatisfactory','Minimal','General','Constructive','Actionable'];
+
+    function parseTags(str){ return new Set(String(str||'').split(',').map(s=>s.trim()).filter(Boolean)); }
+    function stringifyTags(set){ return Array.from(set).join(','); }
+    function inAppsScript(){ return !!(window.google && google.script && google.script.run); }
+    function escapeHtml(s){
+      s = String(s || '');
+      return s.replace(/[&<>"']/g, (m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
+    }
+
+    function confidenceBadgeHTML(conf){
+      const n = Number(conf || 0);
+      if (!n || n < 1 || n > 5) return '';
+      return `<span class="badge c${n}" title="Confidence">Confidence: ${n}</span>`;
+    }
+
+    // Robust timestamp handling
+    function toDate(val){
+      if (!val) return null;
+      if (val instanceof Date) return val;
+      if (typeof val === 'number') return new Date(val);
+      if (typeof val === 'string') {
+        const d = new Date(val);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      try { const d = new Date(val); return isNaN(d.getTime()) ? null : d; } catch(e){ return null; }
+    }
+    function withinWindow(tsVal){
+      const windowMs = Number(HISTORY_WINDOW_MINS || 0) * 60000;
+      if (!windowMs) return true;
+      const ts = toDate(tsVal);
+      if (!ts) return false;
+      const now = new Date();
+      return (now - ts) <= windowMs;
+    }
+
+    // Helper to pick server-side "updated timestamp"
+    function getRowUpdatedTs(row){
+      // Prefer tags_updated_at, then updated_at, then timestamp; all optional
+      const d =
+        toDate(row && row.tags_updated_at) ||
+        toDate(row && row.updated_at) ||
+        toDate(row && row.timestamp);
+      return d || null;
+    }
+
+    // --- Start + Login ---
+    function handleLoginAndStart() {
+      const btn = document.getElementById('startBtn');
+      const msg = document.getElementById('startMsg');
+      msg.textContent = '';
+      btn.disabled = true;
+
+      const inst = (document.getElementById('inst').value || '').trim();
+      const pw = (document.getElementById('instPw').value || '').trim();
+      const sessionId = (document.getElementById('newSessionId').value || '').trim();
+      const duration_mins = parseInt(document.getElementById('sessionDuration').value, 10) || 30;
+
+      if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
+      if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
+      if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
+
+      google.script.run
+        .withSuccessHandler(function (loginRes) {
+          if (loginRes && loginRes.ok) {
+            google.script.run
+              .withSuccessHandler(function (startRes) {
+                if (startRes && startRes.ok) {
+                  INSTRUCTOR_ID = inst;
+                  currentSessionId = sessionId;
+                  activeUntil = startRes.active_until ? new Date(startRes.active_until)
+                                   : new Date(Date.now() + duration_mins * 60000);
+
+                  CURRENT_PHASE = 'writing';
+                  HISTORY_WINDOW_MINS = 5;
+
+                  showDashboard(inst, sessionId);
+                  msg.style.color = '#0a7';
+                  msg.textContent = 'Session started. Loading…';
+                  loadResponses();
+                  startCountdown();
+                  startAutoRefresh();
+                } else {
+                  msg.style.color = '#c00';
+                  msg.textContent = (startRes && startRes.error) || 'Could not start session.';
+                  btn.disabled = false;
+                }
+              })
+              .withFailureHandler(function (err) {
+                msg.style.color = '#c00';
+                msg.textContent = 'Start failed: ' + (err && err.message ? err.message : err);
+                btn.disabled = false;
+              })
+              .apiStartSession(inst, sessionId, duration_mins);
+          } else {
+            msg.style.color = '#c00';
+            msg.textContent = (loginRes && loginRes.error) || 'Invalid login.';
+            btn.disabled = false;
+          }
+        })
+        .withFailureHandler(function (err) {
+          msg.style.color = '#c00';
+          msg.textContent = 'Login failed: ' + (err && err.message ? err.message : err);
+          btn.disabled = false;
+        })
+        .apiInstructorLogin(inst, pw);
+    }
+
+    function showDashboard(inst, sessionId) {
+      document.getElementById('loginView').style.display = 'none';
+      const dashView = document.getElementById('dashView');
+      dashView.style.display = 'block';
+      document.getElementById('sessionLabel').textContent = sessionId;
+
+      render();
+    }
+    
+    function setHistoryWindow(){
+      const val = Number(document.getElementById('historyMins').value || 5);
+      HISTORY_WINDOW_MINS = isNaN(val) ? 5 : Math.max(0, val);
+      render();            // re-render cards with new window
+      renderConfidence();  // update the confidence chart
+      bumpDebugChip();     // keep the debug chip in sync
+    }
+    
+    function openPeerReview(){
+      // Basic guards
+      if (!INSTRUCTOR_ID || !currentSessionId) {
+        alert('Missing instructor or session. Start a session first.');
+        return;
+      }
+      // Use the current "Show last X mins" as the peer window
+      const minsInput = document.getElementById('historyMins');
+      const mins = Math.max(1, Number(minsInput ? minsInput.value : HISTORY_WINDOW_MINS || 5));
+      // Reviews per student
+      const kInput = document.getElementById('peerK');
+      const k = Math.max(1, Number(kInput ? kInput.value : 2));
+      const statusEl = document.getElementById('peerStatus');
+
+      if (statusEl) statusEl.textContent = 'Opening...';
+
+      // Call the server to open peer review for this session
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.ok) {
+            if (statusEl) statusEl.textContent = (res && res.error) ? ('Error: ' + res.error) : 'Failed to open';
+            return;
+          }
+          if (statusEl) statusEl.textContent = `Open ✓ · window ${mins}m · k=${k}`;
+          // Reflect locally that we've switched to review
+          CURRENT_PHASE = 'review';
+          bumpDebugChip();
+        })
+        .withFailureHandler(err => {
+          if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
+        })
+        .apiStartPeerReview(INSTRUCTOR_ID, currentSessionId, mins, k);
+    }
+
+    // --- Stop session ---
+    function stopSession(){
+      if (!INSTRUCTOR_ID || !currentSessionId) return;
+      google.script.run
+        .withSuccessHandler(()=>{
+          document.getElementById('refreshStatus').textContent = 'Stopped';
+          stopAutoRefresh();
+          alert('Session stopped.');
+        })
+        .withFailureHandler(err=>alert(String(err)))
+        .apiStopSession(INSTRUCTOR_ID, currentSessionId);
+    }
+
+    // --- Countdown ---
+    function startCountdown(){
+      const label = document.getElementById('refreshStatus');
+      function tick(){
+        if (!activeUntil) { label.textContent = 'Inactive'; return; }
+        const ms = activeUntil - new Date();
+        if (ms <= 0) { label.textContent = 'Expired'; return; }
+        const mins = Math.floor(ms/60000), secs = Math.floor((ms%60000)/1000);
+        label.textContent = `Active (${mins}m ${secs}s left)`;
+        requestAnimationFrame(tick);
+      }
+      tick();
+    }
+
+    // --- Load responses (auto refresh only) ---
+    function loadResponses(){
+      google.script.run
+        .withSuccessHandler(rows=>{
+          const incoming = Array.isArray(rows) ? rows.filter(r => r != null) : [];
+          const byId = new Map(incoming.map(r => [String(r.response_id), r]));
+
+          // Merge into existing RESPONSES to keep local fresher edits
+          RESPONSES = RESPONSES.map(local => {
+            const rid = String(local.response_id);
+            const serverRow = byId.get(rid);
+            if (!serverRow) return local; // keep local if server didn't send it
+
+            const localTagTs = TAG_WRITE_TS[rid] || 0;
+            const localPosTs = POS_WRITE_TS[rid] || 0;
+            const serverUpdatedTs = (getRowUpdatedTs(serverRow)?.getTime()) || 0;
+
+            // Start from server truth
+            const merged = Object.assign({}, serverRow);
+
+            // If local tags are fresher, keep local tags
+            if (localTagTs && localTagTs > serverUpdatedTs) {
+              merged.tags = local.tags;
+            }
+            // If local position is fresher, keep local pos_x/pos_y
+            if (localPosTs && localPosTs > serverUpdatedTs) {
+              merged.pos_x = local.pos_x;
+              merged.pos_y = local.pos_y;
+            }
+            return merged;
+          });
+
+          // Also add any new rows not present locally
+          const localIds = new Set(RESPONSES.map(r => String(r.response_id)));
+          incoming.forEach(r => { if (!localIds.has(String(r.response_id))) RESPONSES.push(r); });
+
+          render();
+          renderConfidence();
+          bumpDebugChip();
+
+          // Pull batched peer feedback for this session, then re-render
+          if (INSTRUCTOR_ID && currentSessionId) {
+            google.script.run
+              .withSuccessHandler(fb => {
+                const server = (fb && fb.ok && fb.byResponse) ? fb.byResponse : {};
+                // Start with fresh server snapshot
+                FEEDBACK_BY_RESPONSE = server;
+
+                // 🔒 Merge local overrides so the UI never reverts while server lags
+                Object.keys(LOCAL_REVIEW_QUALITY).forEach(rid => {
+                  const serverBucket = FEEDBACK_BY_RESPONSE[rid];
+                  if (!serverBucket || !Array.isArray(serverBucket.items)) return;
+
+                  const localMap = LOCAL_REVIEW_QUALITY[rid]; // { [feedback_key]: {quality, ts} }
+                  serverBucket.items.forEach(item => {
+                    const key = String((item && (item.id ?? item.timestamp)) ?? '');
+                    if (!key) return;
+                    const local = localMap && localMap[key];
+                    if (local && typeof local.quality === 'string' && local.quality.length) {
+                      item.quality = local.quality;
+                    }
+                  });
+                });
+
+                render(); // re-render with merged model
+              })
+              .withFailureHandler(_err => { /* non-fatal; keep going without feedback */ })
+              .apiListFeedbackSummary(INSTRUCTOR_ID, currentSessionId);
+          }
+
+          // Sync CURRENT_PHASE from server so reviews appear/disappear automatically
+          if (INSTRUCTOR_ID) {
+            google.script.run
+              .withSuccessHandler(info => {
+                if (info && info.ok) {
+                  const phase = String(info.phase || 'writing').toLowerCase();
+                  const before = CURRENT_PHASE;
+                  CURRENT_PHASE = (phase === 'review') ? 'review' : 'writing';
+                  if (CURRENT_PHASE !== before) {
+                    render();
+                    bumpDebugChip();
+                  }
+                }
+              })
+              .withFailureHandler(_ => { /* non-fatal */ })
+              .apiGetActiveSessionForInstructor(INSTRUCTOR_ID);
+          }
+        })
+        .withFailureHandler(err=>{ console.error('Load failed:', err); })
+        .apiListResponsesByInstructor(INSTRUCTOR_ID, currentSessionId);
+    }
+
+    // --- Render (cards with tags, delete, drag) ---
+    function render(){
+      
+      // If in poll mode, build first-word counts and draw into poll canvas
+      if (DASH_VIEW_MODE === 'poll') {
+        const canvas = document.getElementById('pollChart');
+        const counts = {};
+
+        const rows = RESPONSES.filter(r =>
+          String(r.is_hidden).toLowerCase() !== 'true' &&
+          withinWindow(r.timestamp)
+        );
+
+        rows.forEach(r => {
+          const raw = String(r.response_text_edited || r.response_text_original || '').trim();
+          if (!raw) return;
+          const first = raw.split(/\s+/)[0] || '';
+          if (!first) return;
+          const key = first.toLowerCase();
+          counts[key] = (counts[key] || 0) + 1;
+        });
+
+        renderPollChart(canvas, counts);
+        return; // don’t render cards when showing poll
+      }
+
+      // === Cards mode ===
+      const listView = document.getElementById('listView');
+      if (!listView) return;
+
+      listView.innerHTML = '';
+      const w = listView.clientWidth || window.innerWidth;
+      const cols = (w < 640) ? 1 : (w < 960 ? 2 : 3);
+      listView.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      // Expose the current column count to CSS for absolute card widths
+      listView.style.setProperty('--cols', cols);
+
+      const rows = RESPONSES
+        .filter(r => String(r.is_hidden).toLowerCase() !== 'true')
+        .filter(r => withinWindow(r.timestamp))
+        .filter(r => String(r.phase_at_submit || 'writing').toLowerCase() === 'writing')
+        .slice()
+        .sort((a,b) => (Number(b.order_weight)||0) - (Number(a.order_weight)||0));
+
+      rows.forEach((r)=>{
+        const txt = String(r.response_text_edited || r.response_text_original || '');
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.setAttribute('data-response-id', String(r.response_id));  // fast lookup for addTagExclusive
+
+        const tagsArray = String(r.tags || '').split(',').map(s=>s.trim()).filter(Boolean);
+        const perfButtons = PERFORMANCE_TAGS.map(t => {
+          const selected = tagsArray.includes(t);
+          return `<button class="tagBtn ${selected ? 'selected' : ''}"
+                          onclick="event.stopPropagation(); addTagExclusive('${r.response_id}','performance','${t}', this)">${t}</button>`;
+        }).join('');
+        const reasonButtons = REASON_TAGS.map(t => {
+          const selected = tagsArray.includes(t);
+          return `<button class="tagBtn ${selected ? 'selected' : ''}"
+                          onclick="event.stopPropagation(); addTagExclusive('${r.response_id}','reason','${t}', this)">${t}</button>`;
+        }).join('');
+
+        /* Reviews block — show ONLY when peer review is OPEN (CURRENT_PHASE === 'review')
+           Also apply the same "Show last X mins" window to the counter and visible items.
+           Persist the open/closed state per response via REVIEWS_COLLAPSE_STATE. */
+        let reviewsHTML = '';
+        if (CURRENT_PHASE === 'review') {
+          const rid = String(r.response_id);
+          const fbSum = FEEDBACK_BY_RESPONSE[rid] || { count: 0, items: [] };
+          const windowedItems = Array.isArray(fbSum.items)
+            ? fbSum.items.filter(it => withinWindow(it.timestamp))
+            : [];
+          const fbCount = windowedItems.length;
+
+          // Remembered open/closed state (default closed)
+          const isOpen = !!REVIEWS_COLLAPSE_STATE[rid];
+          const panelDisplay = isOpen ? 'block' : 'none';
+          const toggleText = isOpen ? '−' : '+';
+
+          const itemsHTML = windowedItems.map((it, idx) => {
+            const safe = escapeHtml(it.text || '');
+
+            // Key to identify this review on save: prefer id, else timestamp, else index
+            const key = String((it && (it.id ?? it.timestamp)) ?? idx);
+
+            // Preselect if your batch already carries a stored quality (e.g., "Constructive")
+            const selectedQuality = String((it && it.quality) || '');
+
+            const buttons = REVIEW_QUALITY.map(q => {
+              const sel = (selectedQuality === q);
+              return `<button class="revTagBtn ${sel ? 'selected' : ''}" data-q="${q}"
+                        onclick="event.stopPropagation(); setReviewQuality('${r.response_id}','${key}','${q}', this)">${q}</button>`;
+            }).join('');
+
+            return `
+              <div class="peerFbItem" style="padding:6px 8px; border:1px solid #eee; border-radius:6px; background:#fafafa; margin-top:6px;">
+                ${safe}
+                <div class="revTagRow" data-feedback-key="${key}">
+                  ${buttons}
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          reviewsHTML = `
+            <div class="reviewsHeader" style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+              <button class="reviewsToggleBtn" style="font-weight:bold; width:30px;">${toggleText}</button>
+              <span><b>Reviews</b> <span class="small" style="color:#666;">(${fbCount})</span></span>
+            </div>
+            <div class="reviewsPanel" style="display:${panelDisplay}; margin-top:6px;" data-response-id="${rid}">
+              ${itemsHTML || '<div class="small" style="color:#888;">No reviews yet…</div>'}
+            </div>
+          `;
+        }
+
+        card.innerHTML = `
+          <div class="rowTop">
+            <span class="leftTop">
+              <span class="drag">⋮⋮</span>
+              <small>${confidenceBadgeHTML(r.confidence)}</small>
+            </span>
+            <span class="rightTop">
+              ${deleteOutlineSVG()}
+            </span>
+          </div>
+
+          <div contenteditable="true" onblur="saveEdit('${r.response_id}', this.textContent)">
+            ${escapeHtml(txt)}
+          </div>
+
+          <!-- Collapse toggle button -->
+          <div style="margin-top:6px; display:flex; align-items:center; gap:4px;">
+            <button class="collapseBtn" style="font-weight:bold; width:30px;">+</button>
+          </div>
+
+          <!-- Collapsible content: both tag groups + summary -->
+          <div class="collapsibleSection" style="display:none; margin-top:6px;">
+            <div class="tagRow"><span class="tagGroupLabel">Performance:</span>${perfButtons}</div>
+            <div class="tagRow"><span class="tagGroupLabel">Reason:</span>${reasonButtons}</div>
+            <div class="tagRow"><span class="tagSummary">Indicators: ${escapeHtml(r.tags || '')}</span></div>
+          </div>
+
+          <!-- Reviews block (only when review is open, persistent open/closed) -->
+          ${reviewsHTML}
+        `;
+
+        const collapseBtn = card.querySelector('.collapseBtn');
+        const collapsible = card.querySelector('.collapsibleSection');
+
+        const expanded = COLLAPSE_STATE[String(r.response_id)] || false;
+        collapsible.style.display = expanded ? 'block' : 'none';
+        collapseBtn.textContent = expanded ? '−' : '+';
+
+        collapseBtn.addEventListener('click', () => {
+          const isExpanded = collapsible.style.display !== 'none';
+          collapsible.style.display = isExpanded ? 'none' : 'block';
+          collapseBtn.textContent = isExpanded ? '+' : '−';
+          COLLAPSE_STATE[String(r.response_id)] = !isExpanded;
+        });
+
+        // Reviews toggle (exists only during review phase) — persist state per response
+        const reviewsBtn = card.querySelector('.reviewsToggleBtn');
+        const reviewsPanel = card.querySelector('.reviewsPanel');
+        if (reviewsBtn && reviewsPanel) {
+          const rid = String(r.response_id);
+          let reviewsOpen = (reviewsPanel.style.display !== 'none'); // initial from DOM
+          reviewsBtn.addEventListener('click', () => {
+            reviewsOpen = !reviewsOpen;
+            reviewsPanel.style.display = reviewsOpen ? 'block' : 'none';
+            reviewsBtn.textContent = reviewsOpen ? '−' : '+';
+            REVIEWS_COLLAPSE_STATE[rid] = reviewsOpen; // persist across re-renders
+          });
+        }
+
+        // Delete handler
+        const deleteBtn = card.querySelector('.pinBtn');
+        if (deleteBtn) attachDeleteHandler(deleteBtn, r.response_id, card);
+
+        /* Position handling */
+        const hasPx = !(r.pos_x === undefined || r.pos_x === null || r.pos_x === '');
+        const hasPy = !(r.pos_y === undefined || r.pos_y === null || r.pos_y === '');
+        const px = hasPx ? Number(r.pos_x) : NaN;
+        const py = hasPy ? Number(r.pos_y) : NaN;
+        let hasStoredPos = Number.isFinite(px) && Number.isFinite(py) && !(px === 0 && py === 0);
+
+        if (hasStoredPos) {
+          const boardRect = listView.getBoundingClientRect();
+          const tooNegative = (px < 0 || py < 0);
+          const tooFarRight = px > (boardRect.width * 5);
+          const tooFarDown  = py > (boardRect.height * 5);
+          if (tooNegative || tooFarRight || tooFarDown) {
+            hasStoredPos = false;
+          }
+        }
+
+        if (hasStoredPos) {
+          // Render as absolute—respect saved coordinates
+          card.classList.add('boardItem');
+          card.style.position = 'absolute';
+          card.style.left = `${px}px`;
+          card.style.top  = `${py}px`;
+        } else {
+          // Default to grid flow—no overlay
+          card.classList.remove('boardItem');
+          card.style.position = 'static';
+          card.style.left = '';
+          card.style.top  = '';
+          card.style.width = '';
+        }
+
+        // Dragging
+        const dragEl = card.querySelector('.drag');
+        if (dragEl) {
+          dragEl.addEventListener('mousedown', (downEv) => {
+            downEv.preventDefault();
+
+            // Ensure absolute positioning on drag start
+            if (!card.classList.contains('boardItem')) {
+              const rect = card.getBoundingClientRect();
+              const boardRect = listView.getBoundingClientRect();
+              const startAbsLeft = rect.left - boardRect.left + listView.scrollLeft;
+              const startAbsTop  = rect.top  - boardRect.top  + listView.scrollTop;
+
+              card.classList.add('boardItem');
+              card.style.position = 'absolute';
+              card.style.left = `${startAbsLeft}px`;
+              card.style.top  = `${startAbsTop}px`;
+            }
+
+            const startX = downEv.clientX, startY = downEv.clientY;
+            const startLeft = parseFloat(card.style.left || '0') || 0;
+            const startTop  = parseFloat(card.style.top  || '0') || 0;
+            card.style.opacity = 0.85;
+
+            const onMove = (moveEv) => {
+              const dx = moveEv.clientX - startX;
+              const dy = moveEv.clientY - startY;
+              card.style.left = `${startLeft + dx}px`;
+              card.style.top  = `${startTop + dy}px`;
+            };
+            const onUp = () => {
+              document.removeEventListener('mousemove', onMove);
+              document.removeEventListener('mouseup', onUp);
+              card.style.opacity = 1;
+              const nx = parseFloat(card.style.left || '0') || 0;
+              const ny = parseFloat(card.style.top  || '0') || 0;
+
+              // Optimistically set local model position
+              const rLocal = RESPONSES.find(x => String(x.response_id) === String(r.response_id));
+              if (rLocal) { rLocal.pos_x = nx; rLocal.pos_y = ny; }
+
+              // Pause auto-refresh during write
+              WRITE_IN_FLIGHT = true;
+              stopAutoRefresh();
+              POS_WRITE_TS[String(r.response_id)] = Date.now();
+
+              savePosition(r.response_id, nx, ny);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          });
+        }
+
+        listView.appendChild(card);
+      });
+    }
+
+    // --- Tagging (exclusive per group) ---
+    function resyncCardTagsUI(cardEl, tagsStr) {
+      const tagsArray = String(tagsStr || '').split(',').map(s => s.trim()).filter(Boolean);
+      const rows = cardEl.querySelectorAll('.tagRow');
+      const perfRow = rows[0];
+      const reasonRow = rows[1];
+      if (perfRow) {
+        perfRow.querySelectorAll('.tagBtn').forEach(btn => {
+          const label = btn.textContent.trim();
+          btn.classList.toggle('selected', tagsArray.includes(label));
+        });
+      }
+      if (reasonRow) {
+        reasonRow.querySelectorAll('.tagBtn').forEach(btn => {
+          const label = btn.textContent.trim();
+          btn.classList.toggle('selected', tagsArray.includes(label));
+        });
+      }
+      const summary = cardEl.querySelector('.tagRow .tagSummary');
+      if (summary) summary.textContent = 'Indicators: ' + (tagsStr || '');
+    }
+
+    window.addTagExclusive = function(responseId, group, tag, btnEl){
+      const r = RESPONSES.find(x => String(x.response_id) === String(responseId));
+      if (!r) return;
+
+      // Compute next tags set (exclusive per group)
+      const existing = parseTags(r.tags);
+      const groupSet = (group === 'performance') ? new Set(PERFORMANCE_TAGS) : new Set(REASON_TAGS);
+      for (const t of Array.from(existing)) { if (groupSet.has(t)) existing.delete(t); }
+      if (tag) existing.add(tag);
+      const next = stringifyTags(existing);
+
+      // Optimistic model update
+      r.tags = next;
+
+      // Update only the card’s DOM using the clicked button
+      let cardEl = btnEl ? btnEl.closest('.card') : null;
+      if (!cardEl) {
+        cardEl = document.querySelector(`.card[data-response-id="${String(responseId)}"]`);
+      }
+      if (cardEl) {
+        const rows = cardEl.querySelectorAll('.tagRow');
+        const targetRow = (group === 'performance') ? rows[0] : rows[1];
+        if (targetRow) {
+          targetRow.querySelectorAll('.tagBtn').forEach(b => {
+            const label = b.textContent.trim();
+            b.classList.toggle('selected', label === tag);
+          });
+        }
+        const summary = cardEl.querySelector('.tagRow .tagSummary');
+        if (summary) summary.textContent = 'Tags: ' + (r.tags || '');
+      }
+
+      // Pause auto-refresh during write, record local write timestamp
+      WRITE_IN_FLIGHT = true;
+      stopAutoRefresh();
+      TAG_WRITE_TS[String(responseId)] = Date.now();
+
+      // Persist to server
+      google.script.run
+        .withSuccessHandler((updatedRow) => {
+          if (updatedRow && String(updatedRow.response_id) === String(responseId)) {
+            Object.assign(r, updatedRow);
+            if (cardEl) resyncCardTagsUI(cardEl, r.tags);
+          }
+          // Small delay to let Sheets become consistent before resuming refresh
+          setTimeout(() => { WRITE_IN_FLIGHT = false; startAutoRefresh(); }, 600);
+        })
+        .withFailureHandler(err => {
+          alert('Save failed: ' + (err && err.message ? err.message : err));
+          WRITE_IN_FLIGHT = false;
+          startAutoRefresh();
+        })
+        .apiUpdateResponse(INSTRUCTOR_ID, responseId, { tags: next });
+    };
+
+    // Persist the quality tag for a specific review item
+    window.setReviewQuality = function(responseId, feedbackKey, quality, btnEl) {
+      // 1) Optimistic UI update: mark selected in this button group
+      const row = btnEl && btnEl.closest('.revTagRow');
+      if (row) {
+        row.querySelectorAll('.revTagBtn').forEach(b => {
+          const q = b.getAttribute('data-q') || '';
+          b.classList.toggle('selected', q === quality);
+        });
+      }
+
+      // 2) Update local cache so selection survives re-render until next batch refresh
+      const rid = String(responseId);
+      const fbObj = FEEDBACK_BY_RESPONSE[rid];
+      if (fbObj && Array.isArray(fbObj.items)) {
+        const it = fbObj.items.find(x => String((x && (x.id ?? x.timestamp))) === String(feedbackKey));
+        if (it) it.quality = quality;
+      }
+
+      // 🔒 NEW: record/refresh the local override with a timestamp
+      if (!LOCAL_REVIEW_QUALITY[rid]) LOCAL_REVIEW_QUALITY[rid] = Object.create(null);
+      LOCAL_REVIEW_QUALITY[rid][String(feedbackKey)] = { quality: String(quality || ''), ts: Date.now() };
+
+      // 3) Persist to server (optional no-op if not in Apps Script context)
+      if (inAppsScript()) {
+        google.script.run
+          .withSuccessHandler(() => { /* saved */ })
+          .withFailureHandler(err => {
+            alert('Save review tag failed: ' + (err && err.message ? err.message : err));
+          })
+          .apiUpdateFeedbackQuality(INSTRUCTOR_ID, currentSessionId, responseId, feedbackKey, quality);
+      }
+    };
+
+    // --- Delete outline & handler ---
+    function deleteOutlineSVG(){
+      return `
+        <button class="pinBtn" title="Delete (hide permanently)">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 6h18"></path>
+            <path d="M8 6V4h8v2"></path>
+            <rect x="6" y="6" width="12" height="14" rx="2" ry="2"></rect>
+            <path d="M10 10v6"></path>
+            <path d="M14 10v6"></path>
+          </svg>
+        </button>
+      `;
+    }
+    function attachDeleteHandler(btnEl, responseId, cardEl){
+      btnEl.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const ok = confirm('Delete this card from view permanently?');
+        if (!ok) return;
+        if (cardEl && cardEl.parentNode) cardEl.parentNode.removeChild(cardEl);
+        google.script.run
+          .withSuccessHandler(()=>{ /* auto-refresh will pick up next tick */ })
+          .withFailureHandler(err=>{ alert('Delete failed: ' + (err && err.message ? err.message : err)); })
+          .apiUpdateResponse(INSTRUCTOR_ID, responseId, { is_hidden: 'TRUE' });
+      });
+    }
+
+    // --- Save edit & position ---
+    function saveEdit(id, text){
+      google.script.run
+        .withSuccessHandler(()=>{ /* auto-refresh will pick up */ })
+        .withFailureHandler(err=>{ alert('Save failed: ' + (err && err.message ? err.message : err)); })
+        .apiUpdateResponse(INSTRUCTOR_ID, id, { response_text_edited: text });
+    }
+    function savePosition(id, x, y){
+      // Persist position; keep using the write-in-flight pause set at drag end
+      google.script.run
+        .withSuccessHandler((updatedRow)=>{
+          const r = RESPONSES.find(rr => String(rr.response_id) === String(id));
+          if (updatedRow && r) {
+            Object.assign(r, updatedRow);
+          }
+          // Small delay to let Sheets become consistent before resuming refresh
+          setTimeout(() => { WRITE_IN_FLIGHT = false; startAutoRefresh(); }, 600);
+        })
+        .withFailureHandler(err=>{
+          alert('Save failed: ' + (err && err.message ? err.message : err));
+          WRITE_IN_FLIGHT = false;
+          startAutoRefresh();
+        })
+        .apiUpdateResponse(INSTRUCTOR_ID, id, { pos_x: x, pos_y: y });
+    }
+
+    // --- Confidence chart (proper bars) ---
+    function renderConfidence() {
+      const panel = document.getElementById('confidencePanel');
+      const canvas = document.getElementById('confidenceChart');
+      if (!panel || !canvas) return;
+
+      // Only consider responses currently shown on the dashboard
+      const visibleResponses = RESPONSES.filter(r =>
+        String(r.is_hidden).toLowerCase() !== 'true' &&
+        withinWindow(r.timestamp) &&
+        Number(r.confidence) >= 1 && Number(r.confidence) <= 5
+      );
+
+      // Show or hide the panel based on whether there are any visible confidence values
+      panel.style.display = visibleResponses.length ? 'block' : 'none';
+
+      if (!visibleResponses.length) return;
+
+      // Count the number of students per confidence level (1–5)
+      const counts = [0, 0, 0, 0, 0];
+      visibleResponses.forEach(r => { counts[r.confidence - 1]++; });
+
+      drawConfidenceChart(canvas, counts);
+    }
+
+    // --- Poll bar chart ---
+    function renderPollChart(canvas, countsObj){
+      if (!canvas) return;
+      const keys = Object.keys(countsObj).sort((a,b)=> countsObj[b] - countsObj[a]);
+      const values = keys.map(k=>countsObj[k]);
+
+      const ctx = canvas.getContext('2d');
+      const cssW = canvas.clientWidth || canvas.width;
+      const cssH = canvas.clientHeight || canvas.height;
+      ctx.clearRect(0,0,cssW,cssH);
+
+      if (!keys.length) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px system-ui, Segoe UI, Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Waiting for responses…', cssW/2, cssH/2);
+        return;
+      }
+
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(cssW*dpr); canvas.height = Math.round(cssH*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+
+      const pad = {top:20,right:16,bottom:60,left:40};
+      const W = cssW - pad.left - pad.right;
+      const H = cssH - pad.top - pad.bottom;
+      const maxVal = Math.max(...values,1);
+      const gap = 10;
+      const n = keys.length;
+      const bw = Math.max(12, Math.floor((W - gap*(n-1)) / n));
+
+      // axes
+      ctx.strokeStyle='#888';
+      ctx.beginPath(); ctx.moveTo(pad.left,pad.top); ctx.lineTo(pad.left,pad.top+H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad.left,pad.top+H); ctx.lineTo(pad.left+W,pad.top+H); ctx.stroke();
+
+      const colors = [
+        '#0072B2', // blue
+        '#E69F00', // orange
+        '#009E73', // green
+        '#D55E00', // vermillion
+        '#CC79A7', // purple
+        '#56B4E9', // sky blue
+        '#F0E442', // yellow
+        '#000000'  // black 
+      ];
+      for (let i=0;i<n;i++){
+        const v = values[i];
+        const x = pad.left + i*(bw+gap);
+        const h = Math.round((v/maxVal)*H);
+        const y = pad.top + H - h;
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fillRect(x,y,bw,h);
+        if (v>0){
+          ctx.fillStyle='#222'; ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.font='12px system-ui, Segoe UI, Arial';
+          ctx.fillText(String(v), x+bw/2, y-4);
+        }
+        // x labels
+        ctx.fillStyle='#444'; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.font='12px system-ui, Segoe UI, Arial';
+        ctx.fillText(String(keys[i]), x+bw/2, pad.top+H+6);
+      }
+    }
+
+    function drawConfidenceChart(canvas, counts){
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth || canvas.width;
+      const cssH = canvas.clientHeight || canvas.height;
+      canvas.width = Math.round(cssW*dpr);
+      canvas.height = Math.round(cssH*dpr);
+
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.clearRect(0,0,cssW,cssH);
+
+      const pad = {top:20,right:16,bottom:40,left:40};
+      const W = cssW - pad.left - pad.right;
+      const H = cssH - pad.top - pad.bottom;
+
+      // Axes
+      ctx.strokeStyle = '#888';
+      ctx.beginPath(); ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad.left, pad.top + H); ctx.lineTo(pad.left + W, pad.top + H); ctx.stroke();
+
+      // Scales
+      const maxVal = Math.max(...counts, 1);
+      const gap = 10;
+      const bw = Math.floor((W - gap*4)/5);
+
+      // y-labels
+      ctx.fillStyle = '#444'; ctx.font = '12px system-ui, Segoe UI, Arial'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText('0', pad.left - 6, pad.top + H);
+      ctx.fillText(String(maxVal), pad.left - 6, pad.top);
+
+      const colors = ['#dbeafe', '#93c5fd','#3b82f6','#1d4ed8','#1e3a8a' ];
+
+      for (let i=0;i<5;i++){
+        const v = counts[i];
+        const x = pad.left + i*(bw + gap);
+        const h = Math.round((v / maxVal) * H);
+        const y = pad.top + H - h;
+
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fillRect(x, y, bw, h);
+
+        if (v > 0) {
+          ctx.fillStyle = '#222'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText(String(v), x + bw/2, y - 4);
+        }
+        // x labels
+        ctx.fillStyle = '#444'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(String(i+1), x + bw/2, pad.top + H + 6);
+      }
+    }
+
+    // --- Debug chip (lightweight status) ---
+    function bumpDebugChip(){
+      const el = document.getElementById('debugChip');
+      if (!el) return;
+      const asOK = inAppsScript() ? '✓' : '✗';
+      el.textContent = `AS ${asOK} · Phase: ${CURRENT_PHASE} · Rows: ${RESPONSES.length} · Window: ${HISTORY_WINDOW_MINS}m · Session: ${currentSessionId||'—'}`;
+    }
+
+    // Responsive columns on resize (grid items)
+    window.addEventListener('resize', ()=>{
+      const listView = document.getElementById('listView');
+      if (!listView) return;
+      const w = listView.clientWidth || window.innerWidth;
+      const cols = (w < 640) ? 1 : (w < 960 ? 2 : 3);
+      listView.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      // keep CSS var --cols in sync for absolute card widths
+      listView.style.setProperty('--cols', cols);
+    });
+  </script>
+</body>
+</html>
