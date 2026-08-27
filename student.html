@@ -139,7 +139,7 @@
 
     <div class="banner" id="infoBanner">
       <div>
-        <strong>Note:</strong> By submitting, you agree that your response may be shown anonymously during class discussion. Responses are submitted anonymously and will be deleted at the end of the course.
+        <strong>Note:</strong> By submitting, you agree that your response may be shown during class discussion. Responses are submitted anonymously and will be deleted at the end of the course.
       </div>
       <div class="small" style="margin-top:8px;">
         <span><b>Instructor:</b> <span id="instLabel">—</span></span>
@@ -328,11 +328,12 @@
           ACTIVE_UNTIL = res.active_until ? new Date(res.active_until) : null;
           LAST_PHASE = CURRENT_PHASE;
           CURRENT_PHASE = String(res.phase || 'writing').toLowerCase();
-
+            console.log(
+            "PHASE LOADED:",
+            CURRENT_PHASE
+          );
           document.getElementById('sessionLabel').textContent = SESSION_ID;
           document.getElementById('sessionStatus').textContent = 'Active';
-
-          if (ACTIVE_UNTIL) startCountdown();
           applyPhaseUI();
 
           // Show toast when switching into review
@@ -350,19 +351,6 @@
     (function init(){ resolveSessionAndPhase(); })();
     // No polling or visibility-change listeners (static view after initial load)
 
-    function startCountdown(){
-      const el = document.getElementById('countdown');
-      function tick(){
-        if (!ACTIVE_UNTIL) { el.textContent = '—'; return; }
-        const ms = ACTIVE_UNTIL - new Date();
-        if (ms <= 0) { el.textContent = 'Expired'; document.getElementById('submitBtn').disabled = true; return; }
-        const mins = Math.floor(ms/60000);
-        const secs = Math.floor((ms%60000)/1000);
-        el.textContent = `${mins}m ${secs}s left`;
-        requestAnimationFrame(tick);
-      }
-      tick();
-    }
     const toggleBtn = document.getElementById('toggleBtn');
     const collapsible = document.getElementById('collapsible');
 
@@ -406,7 +394,7 @@
           if (res && res.ok) {
             document.getElementById('responseText').value = '';
             setStatus('Submitted. Thank you!', false);
-            try { sessionStorage.setItem('reviewer_token', reviewerToken);} catch(e){}
+            try { sessionStorage.setItem('reviewer_token', REVIEWER_TOKEN);} catch(e){}
             const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
           } else {
             setStatus(res && res.error ? res.error : 'Submission failed.', true);
@@ -419,7 +407,7 @@
               if (res2 && res2.ok) {
                 document.getElementById('responseText').value = '';
                 setStatus('Submitted. Thank you!', false);
-                try { sessionStorage.setItem('reviewer_token', reviewerToken); } catch(e){}
+                try { sessionStorage.setItem('reviewer_token', REVIEWER_TOKEN); } catch(e){}
                 const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
               } else {
                 setStatus(res2 && res2.error ? res2.error : 'Submission failed.', true);
@@ -459,8 +447,10 @@
     }
 
     function loadAssignedReviewTasks(uid){
+      console.log("LOAD TASKS UID:", uid);
       google.script.run
         .withSuccessHandler(function(assign){
+          console.log("ASSIGN RESULT:", assign);
           const cont = document.getElementById('assignments');
           cont.innerHTML = '';
           const ids = (assign && assign.ok && Array.isArray(assign.assigned)) ? assign.assigned : [];
@@ -469,9 +459,11 @@
           // fetch completed list to gray out/disable
           google.script.run
             .withSuccessHandler(function(done){
+              console.log("COMPLETED RESULT:", done);
               const completed = (done && done.ok && Array.isArray(done.completed)) ? new Set(done.completed) : new Set();
 
               ids.forEach(rid=>{
+                console.log("Creating card for:", rid);
                 const card = document.createElement('div'); card.className='card';
                 const isDone = completed.has(String(rid));
                 card.classList.toggle('completed', isDone);
@@ -480,7 +472,17 @@
                   <div id="snippet_${rid}" class="small" style="margin:6px 0; color:#444;">Loading text…</div>
                   <textarea id="fb_${rid}" placeholder="Write feedback that is constructive, respectful, and supports shared understanding." rows="3" ${isDone ? 'disabled' : ''}></textarea>
                   <div style="margin-top:8px;">
-                    <button id="btn_${rid}" onclick="submitFeedback('${rid}')" ${isDone ? 'disabled' : ''}>${isDone ? 'Submitted' : 'Submit feedback'}</button>
+                    <button
+                      type="button"
+                      class="btn btn-view"
+                      onclick="markAsBot('${rid}')"
+                      ${isDone ? 'disabled' : ''}
+                    >
+                      ⚠ AI-generated?
+                    </button>
+                  </div>
+                  <div style="margin-top:8px;">
+                    <button id="btn_${rid}" class="btn btn-view" onclick="submitFeedback('${rid}')" ${isDone ? 'disabled' : ''}>${isDone ? 'Submitted' : 'Submit feedback'}</button>
                   </div>
                 `;
                 cont.appendChild(card);
@@ -488,6 +490,7 @@
                 // Fetch and inject the submission text for this assignment
                 google.script.run
                   .withSuccessHandler(res => {
+                    console.log("TEXT RESULT", rid, res);
                     const el = document.getElementById('snippet_' + rid);
                     if (!el) return;
                     if (res && res.ok && typeof res.text === 'string') {
@@ -521,7 +524,14 @@
         .withFailureHandler(err=>{ document.getElementById('assignments').innerHTML = '<div class="small err">Error loading assignments.</div>'; })
         .apiAssignPeerTargets(SESSION_ID, uid, 3); // self + 2 others
     }
-
+    function markAsBot(rid){
+      const ta =
+        document.getElementById('fb_' + rid);
+      if (!ta) return;
+      ta.value =
+        'I think this response may have been generated by AI because: ';
+      ta.focus();
+    }
     function submitFeedback(rid){
       const uid = (
       sessionStorage.getItem('reviewer_token') ||

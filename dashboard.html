@@ -51,8 +51,18 @@
     #listView.board { position: relative; display: grid !important; min-height: 70vh; padding: 12px; background: #fff; overflow: auto; align-items: start; align-content: start;}
 
     /* Cards */
-    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; background: #fff; }
-    .card.boardItem { position: absolute; width: calc(100% / var(--cols, 3) - 16px); box-sizing: border-box; }
+    .card {
+      border: 3px solid #00539b;
+      border-radius: 8px;
+      padding: 12px;    
+      background: #e9f7ff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .card [contenteditable="true"] {background: #ffffff;padding: 8px;border-radius: 6px;overflow-wrap: anywhere;word-break: break-word;}
+    ./*card {border: 2px solid rgba(0,0,0,0.08); box-shadow: 0 2px 6px rgba(0,0,0,0.08); border-radius: 8px; padding: 12px; }*/
+    .card.boardItem { position: absolute; box-sizing: border-box; }
     .hidden { opacity: 0.4; }
     .pinned { border-color: #0a7; }
 
@@ -165,15 +175,6 @@
           <label style="min-width:160px;">Session ID</label>
           <input id="newSessionId" placeholder="e.g., week_01_lec_02" style="flex:1;">
         </div>
-        <div class="row" style="margin-top:8px;">
-          <label style="min-width:160px;">Duration</label>
-          <select id="sessionDuration">
-            <option value="10">10 mins</option>
-            <option value="30">30 mins</option>
-            <option value="60" selected>60 mins</option>
-            <option value="120">120 mins</option>
-          </select>
-        </div>
 
         <div style="margin-top:12px;">
           <button id="startBtn" type="submit" class="btn btn-view" aria-label="Start session" title="Start session">🔓<span class="btn-label">Open</span></button>
@@ -241,6 +242,7 @@
 
     let RESPONSES = [];
     let CURRENT_PHASE = 'writing';
+
     let HISTORY_WINDOW_MINS = 5; // local filter only
 
     // View mode: 'cards' (default) or 'poll'
@@ -337,6 +339,7 @@
 
     // --- Start + Login ---
     function handleLoginAndStart() {
+      console.log("LOGIN STARTED");
       const btn = document.getElementById('startBtn');
       const msg = document.getElementById('startMsg');
       msg.textContent = '';
@@ -345,8 +348,8 @@
       const inst = (document.getElementById('inst').value || '').trim();
       const pw = (document.getElementById('instPw').value || '').trim();
       const sessionId = (document.getElementById('newSessionId').value || '').trim();
-      const duration_mins = parseInt(document.getElementById('sessionDuration').value, 10) || 30;
-
+      //const duration_mins = parseInt(document.getElementById('sessionDuration').value, 10) || 30;
+      const duration_mins = 60;
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
       if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
@@ -359,7 +362,6 @@
                 if (startRes && startRes.ok) {
                   INSTRUCTOR_ID = inst;
                   currentSessionId = sessionId;
-                  CURRENT_PHASE = 'writing';
                   HISTORY_WINDOW_MINS = 5;
 
                   showDashboard(inst, sessionId);
@@ -490,6 +492,7 @@
           if (INSTRUCTOR_ID && currentSessionId) {
             google.script.run
               .withSuccessHandler(fb => {
+                console.log("FEEDBACK SUMMARY", fb);
                 const server = (fb && fb.ok && fb.byResponse) ? fb.byResponse : {};
                 // Start with fresh server snapshot
                 FEEDBACK_BY_RESPONSE = server;
@@ -604,6 +607,14 @@
            Also apply the same "Show last X mins" window to the counter and visible items.
            Persist the open/closed state per response via REVIEWS_COLLAPSE_STATE. */
         let reviewsHTML = '';
+        console.log(
+          "CURRENT_PHASE:",
+          CURRENT_PHASE,
+          "Response:",
+          r.response_id,
+          "Feedback:",
+          FEEDBACK_BY_RESPONSE[String(r.response_id)]
+        );
         if (CURRENT_PHASE === 'review') {
           const rid = String(r.response_id);
           const fbSum = FEEDBACK_BY_RESPONSE[rid] || { count: 0, items: [] };
@@ -760,8 +771,8 @@
               const boardRect = listView.getBoundingClientRect();
               const startAbsLeft = rect.left - boardRect.left + listView.scrollLeft;
               const startAbsTop  = rect.top  - boardRect.top  + listView.scrollTop;
-
               card.classList.add('boardItem');
+              card.style.width = rect.width + 'px';
               card.style.position = 'absolute';
               card.style.left = `${startAbsLeft}px`;
               card.style.top  = `${startAbsTop}px`;

@@ -25,7 +25,6 @@ const SHEET_PEER_ASSIGNMENTS = 'PeerAssignments';
 function pingServer() { return { ok: true, msg: 'pong' }; }
 function ping() { return 'pong'; }
 
-
 // ===== SHEET HELPERS =====
 function getSheetByName(name) {
   const ss = SpreadsheetApp.getActive();
@@ -99,11 +98,37 @@ function getProfanityList() {
 function maskProfanity(text, profList) {
   if (!text) return text;
   let output = text;
+  const vegetables = [
+  '🥕', // carrot
+  '🥔', // potato
+  '🥦', // broccoli
+  '🌽', // corn
+  '🥒', // cucumber
+  '🥬', // leafy greens
+  '🫛', // peas
+  '🍅', // tomato 
+  '🧅', // onion
+  '🧄', // garlic
+  '🫑', // bell pepper
+  '🌶️', // chilli pepper
+  '🥜', // peanut
+  '🍠', // sweet potato
+  '🌰'  // chestnut
+];
   profList.forEach(term => {
-    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = term.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      '\\$&'
+    );
     const re = new RegExp(`\\b${escaped}\\b`, 'gi');
-    output = output.replace(re, '•••');
+    output = output.replace(
+      re,
+      () => vegetables[
+        Math.floor(Math.random() * vegetables.length)
+      ]
+    );
   });
+
   return output;
 }
 function hasProfanity(text, profList) {
@@ -167,11 +192,7 @@ function apiGetSignedInIdentity() {
 }
 
 function isSessionActive(session) {
-  if (!session) return false;
-  const open   = String(session.is_open).toLowerCase() === 'true';
-  const active = String(session.is_active).toLowerCase() === 'true';
-  const until  = session.active_until instanceof Date ? session.active_until : new Date(session.active_until);
-  return open && active && until && (new Date() < until);
+  return !!session;
 }
 /** Phases: only 'writing' or 'review' */
 function getPhaseForSession(session) {
@@ -479,7 +500,7 @@ function apiStartSession(instructor_id, session_id, duration_mins){
     setIfExists(sh, base, hdr, 'active_until', until);
     setIfExists(sh, base, hdr, 'created_at', now);
     setIfExists(sh, base, hdr, 'archived', 'FALSE');
-    setIfExists(sh, base, hdr, 'phase', initialPhase);
+    //setIfExists(sh, base, hdr, 'phase', initialPhase);
     // Optional legacy flags—only set if present
     setIfExists(sh, base, hdr, 'is_review_mode', 'FALSE');
     setIfExists(sh, base, hdr, 'is_poll_mode', 'FALSE');
@@ -1263,10 +1284,8 @@ function apiDebugSessionAndCounts(instructor_id, session_id){
   };
 }
 
-/** Accept POSTs from Canvas and render the student page with pre-resolved canvas_id */
 function doPost(e) {
   try {
-    // NEW: enforce domain (if you still POST through Canvas/other launcher)
     const email = '';
 
     const params = (e && e.parameter) ? e.parameter : {};
@@ -1292,7 +1311,6 @@ function doPost(e) {
         .setTitle('Class Response')
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
     }
-
     // For any other pages, just delegate to GET routing (keeps behavior consistent)
     return doGet(e);
   } catch (err) {
