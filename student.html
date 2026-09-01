@@ -53,7 +53,15 @@
       background-color: var(--sta-blue);
       color: var(--text-light);
     }
-
+    .btn-bot{
+      padding:2px 6px;
+      font-size:14px;
+    }
+    .btn-small{
+      padding:4px 8px;
+      font-size:12px;
+      min-height:auto;
+    }
     .btn-view:hover {
       background-color: var(--sta-blue-hover);
     }
@@ -190,18 +198,33 @@
       <span id="status" class="status"></span>
     </div>
 
-    <!-- Inline Peer Review Panel -->
-    <div id="reviewPanel" class="banner" style="display:none; margin-top:12px;">
-      <div><strong>Peer review</strong> Remember that everyone is doing their best. Provide constructive comments on others' work, and reflect honestly and thoughtfully on your own work.</div>
+    <!-- Peer Review Panel -->
+    <div id="reviewPanel"
+        class="banner"
+        style="display:none; margin-top:12px;">
+      <div>
+        <strong>Peer review</strong>
+        Remember that everyone is doing their best. Make sure to provide constructive comments on others' work.
+      </div>
       <div id="assignments"></div>
-
-      <!-- Download row appears when all assigned reviews are submitted -->
-      <!--<div id="peerDownloadRow" style="margin-top:8px; display:none;">
-        <button onclick="downloadPeerCsv()">Download anonymised CSV</button>
-        <span id="dlStatus" class="status"></span>
-      </div>-->
     </div>
-  </div>
+    <!-- Feedback Received Panel -->
+    <div id="myFeedbackPanel"
+        class="banner"
+        style="display:none; margin-top:12px;">
+      <div style="display:flex;
+                  justify-content:space-between;
+                  align-items:center;">
+        <strong id="feedbackHeading">Feedback received</strong>
+        <button class="btn btn-view btn-small"
+          onclick="loadMyFeedback()">
+          🔄 
+        </button>
+      </div>
+      <div id="myFeedback"
+          style="margin-top:8px;">
+      </div>
+    </div>
 
   <script>
     // --- State ---
@@ -265,16 +288,30 @@
 
       if (CURRENT_PHASE === 'review') {
         textEl.placeholder = 'Peer review is active. Writing is temporarily disabled.';
-        submitBtn.disabled = true;          // disable writing
-        textEl.disabled = true;             // prevent editing while review active
-        reviewEl.style.display = 'block';   // show inline panel
-        maybeLoadAssignments();             // one-time load
+        submitBtn.disabled = true;
+        textEl.disabled = true;
+        reviewEl.style.display = 'block';
+
+        const feedbackPanel =
+          document.getElementById('myFeedbackPanel');
+
+        if (feedbackPanel) {
+          feedbackPanel.style.display = 'none';
+        }
+
+        maybeLoadAssignments();
+
         if (toastEl) toastEl.style.display = 'block';
       } else { // writing
         textEl.placeholder = 'Write your answer…';
         submitBtn.disabled = false;
         textEl.disabled = false;
         reviewEl.style.display = 'none';
+        const feedbackPanel =
+        document.getElementById('myFeedbackPanel');
+        if (feedbackPanel) {
+          feedbackPanel.style.display = 'none';
+          }
       }
     }
 
@@ -474,11 +511,11 @@
                   <div style="margin-top:8px;">
                     <button
                       type="button"
-                      class="btn btn-view"
+                      class="btn-bot"
                       onclick="markAsBot('${rid}')"
-                      ${isDone ? 'disabled' : ''}
-                    >
-                      ⚠ AI-generated?
+                      title="I think this may be AI-generated"
+                      ${isDone ? 'disabled' : ''}>
+                      🤖
                     </button>
                   </div>
                   <div style="margin-top:8px;">
@@ -505,25 +542,54 @@
                     if (el) el.innerHTML = '<span class="small err">Failed to load text.</span>';
                   })
                   .apiGetResponseText(SESSION_ID, rid);
-              });
+                            });
+
+              // Show feedback panel only after assignments are loaded
+              const feedbackPanel =
+                document.getElementById('myFeedbackPanel');
+
+              if (feedbackPanel) {
+                feedbackPanel.style.display = 'block';
+              }
+
+              loadMyFeedback();
 
               // After populating cards, show download CSV if all assigned are completed
               const dlRow = document.getElementById('peerDownloadRow');
+
               if (dlRow) {
-                const allDone = ids.length > 0 && ids.every(id => completed.has(String(id)));
-                dlRow.style.display = allDone ? 'block' : 'none';
+                const allDone =
+                  ids.length > 0 &&
+                  ids.every(id => completed.has(String(id)));
+
+                dlRow.style.display =
+                  allDone ? 'block' : 'none';
               }
 
-              // Cache & lock: prevent future rebuilds
               ASSIGNMENTS_LOADED = true;
               ASSIGNED_IDS = ids.slice();
+
             })
-            .withFailureHandler(err=>{ document.getElementById('assignments').innerHTML = '<div class="small err">Error loading completed status.</div>'; })
-            .apiListFeedbackByReviewer(SESSION_ID, uid);
+            .withFailureHandler(err => {
+              document.getElementById('assignments').innerHTML =
+                '<div class="small err">Error loading completed status.</div>';
+            })
+            .apiListFeedbackByReviewer(
+              SESSION_ID,
+              uid
+            );
+
         })
-        .withFailureHandler(err=>{ document.getElementById('assignments').innerHTML = '<div class="small err">Error loading assignments.</div>'; })
-        .apiAssignPeerTargets(SESSION_ID, uid, 3); // self + 2 others
+        .withFailureHandler(err => {
+          document.getElementById('assignments').innerHTML =
+            '<div class="small err">Error loading assignments.</div>';
+        })
+        .apiAssignPeerTargets(
+          SESSION_ID,
+          uid
+        );
     }
+        
     function markAsBot(rid){
       const ta =
         document.getElementById('fb_' + rid);
@@ -546,7 +612,7 @@
         .withSuccessHandler(function(res){
           if (res && res.ok) {
             setStatus('Feedback submitted.', false);
-
+            loadMyFeedback();
             // Local-only UI update (no rebuild)
             if (ta) { ta.value = ''; ta.disabled = true; }
             if (btn) { btn.disabled = true; btn.textContent = 'Submitted'; }
@@ -573,32 +639,52 @@
         .apiSubmitPeerFeedback(SESSION_ID, rid, uid, txt);
     }
 
-    function downloadPeerCsv(){
-      const statusEl = document.getElementById('dlStatus');
-      statusEl.textContent = 'Preparing CSV…';
-      statusEl.className = 'status';
-      google.script.run
-        .withSuccessHandler(res => {
-          if (!res || !res.ok || !res.base64) {
-            statusEl.textContent = (res && res.error) ? res.error : 'Download failed.';
-            statusEl.className = 'status err';
-            return;
-          }
-          const a = document.createElement('a');
-          a.href = 'data:text/csv;base64,' + res.base64;
-          a.download = res.filename || 'peer_review_set.csv';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          statusEl.textContent = 'CSV downloaded.';
-          statusEl.className = 'status ok';
-        })
-        .withFailureHandler(err => {
-          statusEl.textContent = 'Download failed: ' + (err && err.message ? err.message : err);
-          statusEl.className = 'status err';
-        })
-        .apiGetPeerCsv(SESSION_ID);
-    }
+ function loadMyFeedback() {
+  console.log(
+    "loadMyFeedback SESSION_ID:",
+    SESSION_ID
+    );  
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res || !res.ok) return;
+      const panel =
+        document.getElementById('myFeedbackPanel');
+      const container =
+        document.getElementById('myFeedback');
+      const heading =
+        document.getElementById('feedbackHeading');
+
+      if (heading) {
+        heading.textContent =
+          `Feedback received (${res.feedback.length})`;
+      }
+
+      if (!res.feedback.length) {
+        container.innerHTML =
+          '<div class="small">No feedback received yet.</div>';
+        return;
+      }
+      panel.style.display = 'block';
+      container.innerHTML =
+        res.feedback.map(f => `
+          <div class="card" style="margin-top:8px;">
+            <strong>Peer feedback</strong><br>
+            ${f.feedback}
+          </div>
+        `).join('');
+
+    })
+    .withFailureHandler(err => {
+      console.error(
+        "LOAD MY FEEDBACK ERROR:",
+        err
+      );
+    })
+  .apiGetMyFeedback(
+    SESSION_ID,
+    REVIEWER_TOKEN
+  );
+}
 
     function goToReview(){
       const u = new URL(location.href);

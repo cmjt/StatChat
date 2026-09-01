@@ -1,23 +1,9 @@
-/**
- * Student + Instructor Web App (clean build)
- * - Instructor: login with ID + password; start/stop sessions with timer.
- * - Student: submits Name/ID + Response (+Confidence). Session inferred via instructor’s active session.
- * - Storage: Google Sheets tabs per schema.
- * 
- * 2026-01-14 changes:
- *  - Sessions header lookups made tolerant and aligned to your headers:
- *    session_id, instructor_id, is_open, is_active, active_until, phase, poll_window_mins, created_at, archived, history_window_mins
- *  - Phases limited to 'writing' and 'review'. Poll is a dashboard visualization toggle (first-word chart).
- *  - Writing submissions disabled during 'review' phase.
- *  - Peer review assignments: self + 2 others (n=3).
- *  - Debug APIs for headers and counts.
- */
 // ===== CONFIG =====
 const SHEET_RESPONSES   = 'Responses';
 const SHEET_SESSIONS    = 'Sessions';
 const SHEET_INSTRUCTORS = 'Instructors';
-const SHEET_SETTINGS    = 'Settings';      // optional key-value
-const SHEET_PROFANITY   = 'ProfanityList'; // optional; one term per row
+const SHEET_SETTINGS    = 'Settings';    
+const SHEET_PROFANITY   = 'ProfanityList'; 
 const SHEET_PEER_FEEDBACK    = 'PeerFeedback';
 const SHEET_PEER_ASSIGNMENTS = 'PeerAssignments';
 
@@ -838,9 +824,16 @@ function apiGetOpenPeerSessionForInstructor(instructor_id) {
 /** Assign peer targets for a reviewer: ensure self + others (default n_assign=3)
  *  UPDATED: respects peer window when peer_open is set; excludes hidden; avoids duplicates.
  */
-function apiAssignPeerTargets(session_id, reviewer_id, n_assign) {
-  n_assign = Number(n_assign||0); if (!n_assign) n_assign = 3; // default: self + 2 others
-
+function apiAssignPeerTargets(session_id, reviewer_token, n_assign) {
+  n_assign = Number(n_assign || 0);
+  if (!n_assign) {
+    const cfg =
+      getPeerConfigForSession(session_id);
+    n_assign =
+      (cfg && cfg.required_reviews)
+        ? Number(cfg.required_reviews)
+        : 1;
+  }
   // Responses sheet
   const shR = getResponsesSheet();
   const { header: hdr, rows } = readTable(shR);
@@ -866,12 +859,11 @@ function apiAssignPeerTargets(session_id, reviewer_id, n_assign) {
     : all;
 
   // Require at least one own submission for eligibility
-  const own = candidates.filter(r => r.author === String(reviewer_id||'').trim());
+  const own = candidates.filter(r => r.author === String(reviewer_token||'').trim());
   if (!own.length) return { ok:true, assigned: [] };
 
   // pick latest own submission as mandatory self review
   own.sort((a,b)=> b.ts - a.ts);
-  const selfId = own[0].response_id;
 
   // PeerAssignments sheet & existing assignments
   const shA = getPeerAssignmentsSheet();
@@ -881,16 +873,23 @@ function apiAssignPeerTargets(session_id, reviewer_id, n_assign) {
 
   const existing = aRows
     .filter(r => String(r[aSCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
-                 String(r[aUCol]).trim() === String(reviewer_id))
+                 String(r[aUCol]).trim() === String(reviewer_token))
     .map(r => String(r[aRidCol]));
 
   let assigned = existing.slice();
-  if (!assigned.includes(selfId)) assigned.unshift(selfId);
   assigned = assigned.slice(0, n_assign);
   if (assigned.length >= n_assign) return { ok:true, assigned };
 
   // Sample remaining from candidates (exclude self & already assigned)
-  const remainingIds = candidates.map(r=>r.response_id).filter(id => id !== selfId && !assigned.includes(id));
+  const remainingIds =
+    candidates
+      .filter(r =>
+          r.author !== String(reviewer_token)
+      )
+      .map(r => r.response_id)
+      .filter(id =>
+          !assigned.includes(id)
+      );
   for (let i=remainingIds.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [remainingIds[i],remainingIds[j]]=[remainingIds[j],remainingIds[i]]; }
   const take = remainingIds.slice(0, Math.max(0, n_assign - assigned.length));
   const toAssign = assigned.concat(take).slice(0, n_assign);
@@ -898,8 +897,7 @@ function apiAssignPeerTargets(session_id, reviewer_id, n_assign) {
   // Persist newly assigned (append rows) — [session_id, reviewer_id, response_id, assigned_at]
   const now = new Date();
   const rowsToAppend = [];
-  take.forEach(id => rowsToAppend.push([session_id, String(reviewer_id), id, now]));
-  if (!existing.includes(selfId)) rowsToAppend.unshift([session_id, String(reviewer_id), selfId, now]);
+  take.forEach(id => rowsToAppend.push([session_id, String(reviewer_token), id, now]));
 
   if (rowsToAppend.length){
     const startRow = shA.getLastRow() + 1;
@@ -911,7 +909,7 @@ function apiAssignPeerTargets(session_id, reviewer_id, n_assign) {
 /** Submit peer feedback (free form)
  *  UPDATED: allowed when session is active OR when peer_open is TRUE.
  */
-function apiSubmitPeerFeedback(session_id, response_id, reviewer_id, feedback_text){
+function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback_text){
   const session = getSession(session_id);
   if (!session) throw new Error('Session not found.');
 
@@ -953,7 +951,7 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_id, feedback_te
       case 'feedback_id':  return nextId;
       case 'session_id':   return session_id;
       case 'response_id':  return response_id;
-      case 'reviewer_token':  return String(reviewer_id||'');
+      case 'reviewer_token':  return String(reviewer_token||'');
       case 'feedback_text':return outText;
       case 'timestamp':    return new Date();
       case 'is_hidden':    return 'FALSE';
@@ -1281,6 +1279,65 @@ function apiDebugSessionAndCounts(instructor_id, session_id){
         String(r.phase_at_submit || '').toLowerCase() === 'writing'
       ).length : 0
     }
+  };
+}
+function apiGetMyFeedback(session_id, reviewer_token) {
+  
+  const responsesSh = getResponsesSheet();
+  const feedbackSh = getPeerFeedbackSheet();
+
+  const responses = readTable(responsesSh);
+  const feedback = readTable(feedbackSh);
+
+  const rHdr = responses.header;
+  const fHdr = feedback.header;
+
+  const responseIds = new Set(
+    responses.rows
+      .filter(r =>
+        String(
+          r[rHdr.indexOf('session_id')]
+        ).trim() === String(session_id).trim()
+      )
+      .filter(r =>
+        String(
+          r[rHdr.indexOf('reviewer_token')]
+        ).trim() === String(reviewer_token).trim()
+      )
+      .map(r =>
+        String(
+          r[rHdr.indexOf('response_id')]
+        )
+      )
+  );
+  const results = feedback.rows
+  .filter(r =>
+    String(
+      r[fHdr.indexOf('session_id')]
+    ).trim() === String(session_id).trim()
+  )
+  .filter(r =>
+    responseIds.has(
+      String(
+        r[fHdr.indexOf('response_id')]
+      )
+    )
+  )
+  .map(r => ({
+    response_id: String(
+      r[fHdr.indexOf('response_id')]
+    ),
+    feedback: String(
+      r[fHdr.indexOf('feedback_text')]
+    ),
+    timestamp: String(
+      r[fHdr.indexOf('timestamp')]
+    )
+  }));
+
+  return {
+    ok: true,
+    feedback: results
   };
 }
 
