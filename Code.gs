@@ -853,10 +853,7 @@ function apiAssignPeerTargets(session_id, reviewer_token, n_assign) {
     .filter(r => String(r.is_hidden).toLowerCase() !== 'true');
 
   // If peer review is configured, restrict to window [opened_at - window_mins, opened_at]
-  const cfg = getPeerConfigForSession(session_id);
-  const candidates = (cfg)
-    ? all.filter(r => r.ts && r.ts >= new Date(cfg.opened_at.getTime() - cfg.window_mins*60000) && r.ts <= cfg.opened_at)
-    : all;
+  const candidates = all;
 
   // Require at least one own submission for eligibility
   const own = candidates.filter(r => r.author === String(reviewer_token||'').trim());
@@ -1310,6 +1307,18 @@ function apiGetMyFeedback(session_id, reviewer_token) {
         )
       )
   );
+  const responseLookup = {};
+    responses.rows.forEach(r => {
+      const rid = String(
+        r[rHdr.indexOf('response_id')]
+      );
+      if (responseIds.has(rid)) {
+        responseLookup[rid] =
+          r[rHdr.indexOf('response_text_edited')] ||
+          r[rHdr.indexOf('response_text')] ||
+          '';
+      }
+  });
   const results = feedback.rows
   .filter(r =>
     String(
@@ -1323,18 +1332,39 @@ function apiGetMyFeedback(session_id, reviewer_token) {
       )
     )
   )
-  .map(r => ({
-    response_id: String(
+  .map(r => {
+    const rid = String(
       r[fHdr.indexOf('response_id')]
-    ),
-    feedback: String(
-      r[fHdr.indexOf('feedback_text')]
-    ),
-    timestamp: String(
-      r[fHdr.indexOf('timestamp')]
-    )
-  }));
-
+    );
+    const responseRow = responses.rows.find(resp =>
+      String(
+        resp[rHdr.indexOf('response_id')]
+      ) === rid
+    );
+    return {
+      response_id: rid,
+      response_text: responseRow
+        ? (
+            String(
+              responseRow[
+                rHdr.indexOf('response_text_edited')
+              ] || ''
+            ) ||
+            String(
+              responseRow[
+                rHdr.indexOf('response_text_original')
+              ] || ''
+            )
+          )
+        : '',
+      feedback: String(
+        r[fHdr.indexOf('feedback_text')]
+      ),
+      timestamp: String(
+        r[fHdr.indexOf('timestamp')]
+      )
+    };
+  });
   return {
     ok: true,
     feedback: results

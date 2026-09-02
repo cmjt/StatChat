@@ -217,8 +217,8 @@
                   align-items:center;">
         <strong id="feedbackHeading">Feedback received</strong>
         <button class="btn btn-view btn-small"
-          onclick="loadMyFeedback()">
-          🔄 
+          onclick="refreshMyFeedback()">
+          ↻ 
         </button>
       </div>
       <div id="myFeedback"
@@ -547,13 +547,24 @@
               // Show feedback panel only after assignments are loaded
               const feedbackPanel =
                 document.getElementById('myFeedbackPanel');
-
+              const allDone =
+                ids.length > 0 &&
+                ids.every(id => completed.has(String(id)));
               if (feedbackPanel) {
-                feedbackPanel.style.display = 'block';
+                feedbackPanel.style.display =
+                  allDone ? 'block' : 'none';
               }
+              if (feedbackPanel) {
+              if (allDone) {
+                feedbackPanel.style.display = 'block';
+                loadMyFeedback();
+              } else {
+                feedbackPanel.style.display = 'block';
+                document.getElementById('myFeedback').innerHTML =
+                  '<div class="small">Submit all assigned peer reviews to unlock received feedback.</div>';
 
-              loadMyFeedback();
-
+                }
+              }
               // After populating cards, show download CSV if all assigned are completed
               const dlRow = document.getElementById('peerDownloadRow');
 
@@ -611,7 +622,7 @@
       google.script.run
         .withSuccessHandler(function(res){
           if (res && res.ok) {
-            setStatus('Feedback submitted.', false);
+            // setStatus('Feedback submitted.', false);
             loadMyFeedback();
             // Local-only UI update (no rebuild)
             if (ta) { ta.value = ''; ta.disabled = true; }
@@ -640,10 +651,6 @@
     }
 
  function loadMyFeedback() {
-  console.log(
-    "loadMyFeedback SESSION_ID:",
-    SESSION_ID
-    );  
   google.script.run
     .withSuccessHandler(res => {
       if (!res || !res.ok) return;
@@ -668,11 +675,19 @@
       container.innerHTML =
         res.feedback.map(f => `
           <div class="card" style="margin-top:8px;">
+            <div style="
+              margin-bottom:8px;
+              padding:8px;
+              background:#f3f4f6;
+              border-radius:6px;
+            ">
+              <strong>Your response</strong><br>
+              ${f.response_text}
+            </div>
             <strong>Peer feedback</strong><br>
             ${f.feedback}
           </div>
         `).join('');
-
     })
     .withFailureHandler(err => {
       console.error(
@@ -685,7 +700,17 @@
     REVIEWER_TOKEN
   );
 }
-
+    function refreshMyFeedback() {
+      const allDone =
+        ASSIGNED_IDS.length > 0 &&
+        ASSIGNED_IDS.every(id =>
+          COMPLETED_IDS.has(String(id))
+        );
+      if (!allDone) {
+        return;
+      }
+      loadMyFeedback();
+    }
     function goToReview(){
       const u = new URL(location.href);
       const inst = INSTRUCTOR_ID || u.searchParams.get('inst') || '';

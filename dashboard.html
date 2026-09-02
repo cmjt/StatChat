@@ -435,7 +435,7 @@
             if (statusEl) statusEl.textContent = (res && res.error) ? ('Error: ' + res.error) : 'Failed to open';
             return;
           }
-          if (statusEl) statusEl.textContent = `Open ✓ · window ${mins}m · k=${k}`;
+          if (statusEl) statusEl.textContent = `Open ✓ · peers=${k}`;
           // Reflect locally that we've switched to review
           CURRENT_PHASE = 'review';
           bumpDebugChip();
