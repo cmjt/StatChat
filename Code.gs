@@ -25,10 +25,6 @@ function withScriptLock_(fn) {
   }
 }
 
-// ===== PING =====
-function pingServer() { return { ok: true, msg: 'pong' }; }
-function ping() { return 'pong'; }
-
 // ===== SHEET HELPERS =====
 function getSheetByName(name) {
   const ss = SpreadsheetApp.getActive();
@@ -61,8 +57,6 @@ function readTable(sh) {
 function getPeerFeedbackSheet(){ return getSheetByName(SHEET_PEER_FEEDBACK); }
 function getPeerAssignmentsSheet(){ return getSheetByName(SHEET_PEER_ASSIGNMENTS); }
 
-/** Safe header index: returns -1 if missing (no throw) */
-function idxOrMinus1(header, name) { return header.indexOf(name); }
 /** Get a required column index (throws if missing) */
 function idxRequired(header, name) {
   const i = header.indexOf(name);
@@ -156,10 +150,6 @@ function nextResponseId(sh) {
   const max = nums.length ? Math.max(...nums) : 0;
   return max + 1;
 }
-function normalizePollValue(text) {
-  if (!text) return '';
-  return String(text).trim().toLowerCase().replace(/\s+/g, ' ');
-}
 
 // ===== INSTRUCTORS & SESSIONS =====
 function getInstructorById_(instructor_id) {
@@ -186,13 +176,6 @@ function getSession(session_id) {
     if (String(rec.session_id).trim().toLowerCase() === target) return rec;
   }
   return null;
-}
-function apiGetSignedInIdentity() {
-  return {
-    ok: true,
-    email: '',
-    upi: ''
-  };
 }
 
 // ===== SESSION STATE =====
@@ -236,7 +219,7 @@ function getPhaseForSession(session) {
   return 'writing';
 }
 
-// ===== Peer review small helpers (NEW) =====
+// ===== Small parsing helpers =====
 function prParseDate(v) { try { return v instanceof Date ? v : (v ? new Date(v) : null); } catch(e){ return null; } }
 function prBool(v) { return String(v || '').toLowerCase() === 'true'; }
 // ===== PEER REVIEW PROGRESS =====
@@ -280,6 +263,20 @@ function assignedIds_(session_id, reviewer_token) {
   return aRows
     .filter(r => sameId_(r[aSCol], session_id) && String(r[aUCol]).trim() === token)
     .map(r => String(r[aRidCol]));
+}
+
+/** How many reviewers each response_id in this session has been assigned to: Map id -> count */
+function assignmentCounts_(session_id) {
+  const { header: aHdr, rows: aRows } = readTable(getPeerAssignmentsSheet());
+  const aSCol = aHdr.indexOf('session_id'), aRidCol = aHdr.indexOf('response_id');
+  const counts = new Map();
+  if (aSCol === -1 || aRidCol === -1) return counts;
+  aRows.forEach(r => {
+    if (!sameId_(r[aSCol], session_id)) return;
+    const id = String(r[aRidCol]);
+    counts.set(id, (counts.get(id) || 0) + 1);
+  });
+  return counts;
 }
 
 /** response_ids this reviewer has already reviewed in this session (ignoring hidden reviews) */
@@ -329,47 +326,6 @@ function writeResponse_(payload) {
     return id;
   });
 }
-function updateResponseModeration_(response_id, updates) {
-  const sh = getResponsesSheet();
-  const { header, colIndex } = getHeaderMap(sh);
-  const idColZero = colIndex('response_id') - 1;
-  const last = sh.getLastRow();
-  if (last < 2) return false;
-  const ids = sh.getRange(2, idColZero + 1, last - 1, 1).getValues().flat();
-  for (let i = 0; i < ids.length; i++) {
-    if (String(ids[i]) === String(response_id)) {
-      const rowIdx = 2 + i;
-      Object.keys(updates).forEach(key => {
-        const col = header.indexOf(key);
-        if (col >= 0) sh.getRange(rowIdx, col + 1).setValue(updates[key]);
-      });
-      return true;
-    }
-  }
-  return false;
-}
-function listResponses_(session_id) {
-  const sh = getResponsesSheet();
-  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  const data = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 0), sh.getLastColumn()).getValues();
-  const target = String(session_id).trim().toLowerCase();
-  return data.map(row => {
-    const rec = {};
-    headers.forEach((h, i) => rec[h] = row[i]);
-    return rec;
-  }).filter(r => String(r.session_id).trim().toLowerCase() === target);
-}
-
-// ===== AUTH HELPERS (NEW) =====
-/** Return signed-in user's email (Workspace only) or '' if unavailable */
-function getAuthedEmail() {
-  try {
-    const em = Session.getActiveUser().getEmail();
-    return (typeof em === 'string') ? em : '';
-  } catch (e) {
-    return '';
-  }
-}
 
 // ===== WEB ROUTES =====
 function doGet(e) {
@@ -377,16 +333,8 @@ function doGet(e) {
   const page = pageRaw.toLowerCase();
 
   if (page === 'student') {
-    const email = '';
-
     const t = HtmlService.createTemplateFromFile('student');
     t.inst = (e && e.parameter && e.parameter.inst) ? String(e.parameter.inst) : '';
-    t.exec = ScriptApp.getService().getUrl();
-    // legacy (safe to keep; ignored by Google-login flow)
-    t.canvas_id = (e && e.parameter && e.parameter.canvas_id) ? String(e.parameter.canvas_id) : '';
-    // NEW: pass authed email to template
-    t.email = String(email || '');
-
     return t.evaluate()
       .setTitle('Class Response')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -399,19 +347,8 @@ function doGet(e) {
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
-  if (page === 'review') {
-    return HtmlService.createHtmlOutputFromFile('student_review')
-      .setTitle('Peer Review')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
-
   return HtmlService.createHtmlOutput('<p>Invalid page</p>')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-function json(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // ===== STUDENT API =====
@@ -453,14 +390,11 @@ function apiSubmitResponse(session_id, payload) {
     }
   }
 
-  // Poll flags deprecated: always false
   const rowPayload = {
     session_id,
     reviewer_token: String(payload.reviewer_token || ''),
     response_text_original: text,
     response_text_edited: (profanity_flag === 'MASKED') ? response_text_masked : '',
-    is_poll: 'FALSE',
-    poll_value_normalized: '',
     is_hidden: 'FALSE',
     is_pinned: 'FALSE',
     order_weight: '',
@@ -611,7 +545,9 @@ function apiStartSession(token, session_id, duration_mins){
   );
 
   const now = new Date();
-  const until = new Date(now.getTime() + Number(duration_mins) * 60 * 1000);
+  // Writing duration chosen at login: 1 minute to 24 hours, default 60
+  const mins = Math.min(24 * 60, Math.max(1, parseInt(duration_mins, 10) || 60));
+  const until = new Date(now.getTime() + mins * 60 * 1000);
   const initialPhase = 'writing';
   let phase = initialPhase;
 
@@ -647,7 +583,6 @@ function apiStartSession(token, session_id, duration_mins){
       setIfExists(sh, base, hdr, 'peer_open', 'FALSE');
       setIfExists(sh, base, hdr, 'is_review_mode', 'FALSE');
     }
-    // Optional extras: history_window_mins, poll_window_mins – left unchanged
   } else {
     // Build a row honoring available headers
     const row = hdr.map(h=>{
@@ -671,10 +606,8 @@ function apiStartSession(token, session_id, duration_mins){
   return { ok:true, session_id, active_until: until.toISOString(), phase };
 }
 
-/** Set phase: writing | review (poll removed as a phase). 
- *  Optional: pass history_window_mins to persist to Sessions if the column exists.
- */
-function apiSetPhase(token, session_id, phase, history_window_mins) {
+/** Set phase: writing | review. Returning to writing ends peer review. */
+function apiSetPhase(token, session_id, phase) {
   const instructor_id = requireInstructor_(token);
   const phases = new Set(['writing','review']);
   phase = String(phase || '').trim().toLowerCase();
@@ -700,62 +633,7 @@ function apiSetPhase(token, session_id, phase, history_window_mins) {
   // Returning to writing closes peer review, so students no longer fall back into it
   if (phase === 'writing') setIfExists(sh, base, hdr, 'peer_open', 'FALSE');
 
-  // Persist minutes if provided and column exists (lowercase: history_window_mins)
-  if (history_window_mins != null) {
-    setIfExists(sh, base, hdr, 'history_window_mins', Number(history_window_mins) || 0);
-  }
-
   return { ok:true, phase };
-}
-
-/** Resolve active session for instructor (phase + history_window_mins tolerant) */
-function apiGetActiveSessionForInstructor(instructor_id) {
-  const sh = getSheetByName(SHEET_SESSIONS);
-  const { header: hdr, rows } = readTable(sh);
-  const now = new Date();
-
-  const idCol    = idxRequired(hdr, 'session_id');
-  const instCol  = idxRequired(hdr, 'instructor_id');
-  const openCol  = idxRequired(hdr, 'is_open');
-  const actCol   = idxRequired(hdr, 'is_active');
-  const untilCol = idxRequired(hdr, 'active_until');
-  const phaseCol = idxOrMinus1(hdr, 'phase');
-  const histCol  = idxOrMinus1(hdr, 'history_window_mins'); // lowercase per your sheet
-
-  const recs = rows.map(r=>{
-    return {
-      session_id:      r[idCol],
-      instructor_id:   r[instCol],
-      is_open:         String(r[openCol]),
-      is_active:       String(r[actCol]),
-      active_until:    r[untilCol],
-      phase:           (phaseCol >= 0) ? String(r[phaseCol] || '') : 'writing',
-      history_window_mins: (histCol >= 0) ? Number(r[histCol] || 0) : 0
-    };
-  });
-
-  const active = recs.filter(rec =>
-    String(rec.instructor_id) === String(instructor_id) &&
-    rec.is_open.toLowerCase() === 'true' &&
-    rec.is_active.toLowerCase() === 'true' &&
-    rec.active_until && (now < (rec.active_until instanceof Date ? rec.active_until : new Date(rec.active_until)))
-  );
-  if (!active.length) return { ok:true, session_id:'', active:false };
-
-  active.sort((a,b)=> new Date(b.active_until) - new Date(a.active_until));
-  const top = active[0];
-
-  return {
-    ok:true,
-    session_id: top.session_id,
-    active_until: new Date(top.active_until).toISOString(),
-    active:true,
-    phase: String(top.phase || '').trim().toLowerCase() === 'review' ? 'review' : 'writing',
-    history_window_mins: Number(top.history_window_mins || 0),
-    // legacy flags (not used anymore)
-    is_review_mode: String(top.phase || '').trim().toLowerCase() === 'review',
-    is_poll_mode:   false
-  };
 }
 
 /** Stop session early: closes writing. Peer review (if open) continues until its deadline. */
@@ -871,11 +749,10 @@ function listResponsesForInstructor_(instructor_id, session_id) {
       timestamp: String(r[idx('timestamp')] || ''),
       is_hidden: String(r[idx('is_hidden')] || 'FALSE'),
       is_pinned: String(r[idx('is_pinned')] || 'FALSE'),
-      is_poll: 'FALSE', // deprecated
-      poll_value_normalized: '',
       order_weight: Number(r[idx('order_weight')] || 0),
       confidence: Number(r[idx('confidence')] || ''),
       tags: String(r[idx('tags')] || ''),
+      profanity_flag: idx('profanity_flag') >= 0 ? String(r[idx('profanity_flag')] || '') : '',
       pos_x: Number(r[idx('pos_x')] || 0),
       pos_y: Number(r[idx('pos_y')] || 0),
       phase_at_submit: idx('phase_at_submit') >= 0 ? String(r[idx('phase_at_submit')] || '') : ''
@@ -915,23 +792,6 @@ function apiUpdateResponse(token, response_id, patch) {
   });
 
   return { ok: true };
-}
-
-/** Export CSV for instructor + session */
-function apiExportCSV(token, session_id) {
-  const rows = listResponsesForInstructor_(requireInstructor_(token), session_id);
-  const headers = Object.keys(rows[0] || {
-    response_id:'', session_id:'', timestamp:'', reviewer_token:'', response_text_original:'', response_text_edited:'',
-    is_poll:'', poll_value_normalized:'', is_hidden:'', is_pinned:'', order_weight:'', profanity_flag:'', confidence:'', tags:'', phase_at_submit:''
-  });
-  const csv = [headers.join(',')].concat(
-    rows.map(r => headers.map(h => {
-      const v = r[h] === undefined ? '' : r[h];
-      const s = String(v).replace(/"/g,'""');
-      return `"${s}"`;
-    }).join(','))
-  ).join('\n');
-  return csv;
 }
 
 // ===== PEER REVIEW API =====
@@ -1002,7 +862,7 @@ function apiGetResponseText(session_id, response_id) {
 /*********************************
  * OPEN peer review (instructor) *
  *********************************/
-function apiStartPeerReview(token, session_id, window_mins, reviews_per_student, peer_until_iso) {
+function apiStartPeerReview(token, session_id, reviews_per_student, peer_until_iso) {
   const instructor_id = requireInstructor_(token);
   if (!session_id) throw new Error('Missing session.');
   const peerUntil = parseDeadline_(peer_until_iso); // null = no deadline
@@ -1024,14 +884,12 @@ function apiStartPeerReview(token, session_id, window_mins, reviews_per_student,
 
   const base = 2 + rowIdx;
   const openedAt = new Date();
-  const wm = Math.max(1, parseInt(window_mins,10) || 5);
   const k  = Math.max(1, parseInt(reviews_per_student,10) || DEFAULT_REVIEWS_PER_STUDENT);
 
   // Only set columns if they exist
   setIfExists(sh, base, hdr, 'phase', 'review');
   setIfExists(sh, base, hdr, 'peer_open', 'TRUE');
   setIfExists(sh, base, hdr, 'peer_opened_at', openedAt);
-  setIfExists(sh, base, hdr, 'peer_window_mins', wm);
   setIfExists(sh, base, hdr, 'peer_required_reviews', k);
   setIfExists(sh, base, hdr, 'peer_until', peerUntil || '');
 
@@ -1047,7 +905,7 @@ function apiStartPeerReview(token, session_id, window_mins, reviews_per_student,
   }
 
   return {
-    ok:true, session_id, phase:'review', peer_open:true, window_mins: wm, reviews_per_student: k,
+    ok:true, session_id, phase:'review', peer_open:true, reviews_per_student: k,
     opened_at: openedAt.toISOString(), peer_until: peerUntil ? peerUntil.toISOString() : ''
   };
 }
@@ -1115,13 +973,18 @@ function apiAssignPeerTargets(session_id, reviewer_token) {
     // After the review deadline, show existing assignments but don't hand out new ones
     if (!areReviewsOpen_(progress.session)) return { ok:true, assigned };
 
-    // Sample from other students' visible responses not already assigned to this reviewer
+    // Pool: other students' visible responses not already assigned to this reviewer
     // (including assignments that were later hidden, so they never come back)
     const everAssigned = new Set(assignedIds_(session_id, token));
     const pool = visible
       .filter(v => v.author !== token && !everAssigned.has(v.response_id))
       .map(v => v.response_id);
+    // Balance the load: prefer responses with the fewest reviewers so far, so every
+    // response gets reviewed before any gets a second reviewer. Shuffle first so ties
+    // are broken randomly (Array.prototype.sort is stable in V8).
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    const load = assignmentCounts_(session_id);
+    pool.sort((a, b) => (load.get(a) || 0) - (load.get(b) || 0));
     const take = pool.slice(0, n - assigned.length);
 
     // Persist newly assigned, honouring the sheet's header order
@@ -1163,11 +1026,19 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback
 
   const profList = getProfanityList();
   const hasProf = hasProfanity(text, profList);
+  // Same handling as responses: mask (default), block, or flag for the instructor
   let outText = text;
-  if (hasProf && (settings.profanity_action||'mask').toLowerCase() === 'mask'){
-    outText = maskProfanity(text, profList);
-  } else if (hasProf && (settings.profanity_action||'mask').toLowerCase() === 'block'){
-    throw new Error('Your feedback contains disallowed terms.');
+  let profanity_flag = 'NONE';
+  const action = (settings.profanity_action || 'mask').toLowerCase();
+  if (hasProf) {
+    if (action === 'block') {
+      throw new Error('Your feedback contains disallowed terms.');
+    } else if (action === 'mask') {
+      outText = maskProfanity(text, profList);
+      profanity_flag = 'MASKED';
+    } else {
+      profanity_flag = 'FLAGGED';
+    }
   }
 
   const sh = getPeerFeedbackSheet();
@@ -1203,6 +1074,7 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback
         case 'response_id':  return rid;
         case 'reviewer_token':  return token;
         case 'feedback_text':return outText;
+        case 'profanity_flag': return profanity_flag;
         case 'timestamp':    return new Date();
         case 'is_hidden':    return 'FALSE';
         default:             return '';
@@ -1213,67 +1085,6 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback
   });
 }
 
-/********************************
- * Anonymised CSV for students  *
- ********************************/
-function apiGetPeerCsv_(session_id) {
-  if (!session_id) return { ok:false, error:'Missing session_id' };
-
-  // Get assignment targets for this session
-  const shA = getPeerAssignmentsSheet();
-  const { header: aHdr, rows: aRows } = readTable(shA);
-  const aIdx = (name)=>{ const i=aHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerAssignments.`); return i; };
-  const aSCol = aIdx('session_id'), aRidCol = aIdx('response_id');
-
-  const targets = new Set(
-    aRows.filter(r => String(r[aSCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase())
-         .map(r => String(r[aRidCol]||''))
-         .filter(Boolean)
-  );
-  if (!targets.size) return { ok:false, error:'No peer review pool found.' };
-
-  // Join to Responses to get text (prefer edited; exclude hidden)
-  const shR = getResponsesSheet();
-  const { header: rHdr, rows: rRows } = readTable(shR);
-  const rIdx = (name)=>{ const i=rHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
-  const rIdCol = rIdx('response_id'), hidCol = rIdx('is_hidden'), txtECol = rIdx('response_text_edited'), txtOCol = rIdx('response_text_original');
-
-  const lines = [['response_id','text']];
-  rRows.forEach(r => {
-    const rid = String(r[rIdCol]||'');
-    if (!targets.has(rid)) return;
-    const hidden = String(r[hidCol]||'FALSE').toLowerCase()==='true';
-    if (hidden) return;
-    const text = String(r[txtECol]||'') || String(r[txtOCol]||'');
-    lines.push([rid, text.replace(/\r?\n/g,' ').trim()]);
-  });
-
-  if (lines.length <= 1) return { ok:false, error:'No visible items to export.' };
-
-  const csv = lines.map(cols => cols.map(c => {
-    const s = String(c||'');
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-  }).join(',')).join('\n');
-
-  const blob = Utilities.newBlob(csv, 'text/csv', 'peer_review_set.csv');
-  const base64 = Utilities.base64Encode(blob.getBytes()); // standard base64 for data: URL
-  return { ok:true, filename:'peer_review_set.csv', base64 };
-}
-
-/** List feedback items for a response */
-function apiListFeedbackForResponse_(session_id, response_id){
-  const sh = getPeerFeedbackSheet();
-  const { header: hdr, rows } = readTable(sh);
-  const idx = (name)=>{ const i=hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerFeedback.`); return i; };
-  const sCol=idx('session_id'), rCol=idx('response_id'), hCol=idx('is_hidden'), tCol=idx('feedback_text');
-
-  const targetS = String(session_id).trim().toLowerCase();
-  return rows
-    .filter(r => String(r[sCol]).trim().toLowerCase() === targetS &&
-                 String(r[rCol]).trim() === String(response_id) &&
-                 String(r[hCol]).toLowerCase() !== 'true')
-    .map(r => ({ feedback_text: String(r[tCol]||'') }));
-}
 /************ Peer feedback utilities ************/
 
 /**
@@ -1356,7 +1167,8 @@ function apiListFeedbackSummary(token, session_id) {
         id: String(r.feedback_id || ''),            // if blank, client will fall back to timestamp
         text: String(r.feedback_text || ''),
         timestamp: iso,
-        quality: String(r.review_quality || '')     // may be blank initially
+        quality: String(r.review_quality || ''),    // may be blank initially
+        flagged: String(r.profanity_flag || '').toUpperCase() === 'FLAGGED'
       };
 
       byResponse[rid].items.push(item);
@@ -1463,79 +1275,7 @@ function apiListFeedbackSummary(token, session_id) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }
   }
-/** Return anonymized visible content for a session (non-hidden only) */
-function apiGetAnonymizedContent_(session_id){
-  const shR = getResponsesSheet();
-  const { header: hdr, rows } = readTable(shR);
-  const idx = (name)=>{ const i=hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
 
-  const sCol=idx('session_id'), hidCol=idx('is_hidden'),
-        txtOrigCol=idx('response_text_original'), txtEditCol=idx('response_text_edited'), idCol=idx('response_id');
-
-  const targetS = String(session_id).trim().toLowerCase();
-  const visible = rows
-    .filter(r => String(r[sCol]).trim().toLowerCase() === targetS &&
-                 String(r[hidCol]).toLowerCase() !== 'true')
-    .map(r => ({
-      response_id: String(r[idCol]||''),
-      text: String(r[txtEditCol]||'') || String(r[txtOrigCol]||'')
-    }));
-
-  // Collect feedback per response
-  const shF = getPeerFeedbackSheet();
-  const { header: fHdr, rows: fRows } = readTable(shF);
-  const fIdx = (name)=>{ const i=fHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerFeedback.`); return i; };
-  const fSCol=fIdx('session_id'), fRCol=fIdx('response_id'), fHCol=fIdx('is_hidden'), fTCol=fIdx('feedback_text');
-
-  const targetVisible = visible.map(v => v.response_id);
-  const feedbackMap = new Map();
-  visible.forEach(v => feedbackMap.set(v.response_id, []));
-  fRows.forEach(r => {
-    const sess = String(r[fSCol]).trim().toLowerCase();
-    const rid  = String(r[fRCol]).trim();
-    if (sess !== targetS) return;
-    if (!targetVisible.includes(rid)) return;
-    if (String(r[fHCol]).toLowerCase() === 'true') return;
-    const txt = String(r[fTCol]||'');
-    feedbackMap.get(rid).push(txt);
-  });
-
-  return visible.map(v => ({
-    response_id: v.response_id,
-    text: v.text,
-    feedbacks: feedbackMap.get(v.response_id) || []
-  }));
-}
-
-// ===== DEBUG APIS =====
-
-/** Inspect Sessions headers quickly */
-function apiDebugSessionsHeaders_(){
-  const sh = getSheetByName(SHEET_SESSIONS);
-  const { header } = readTable(sh);
-  return { ok:true, headers: header };
-}
-
-/** Inspect active session & counts for troubleshooting */
-function apiDebugSessionAndCounts_(instructor_id, session_id){
-  const info = apiGetActiveSessionForInstructor(instructor_id);
-  let rows = [];
-  try { rows = listResponsesForInstructor_(instructor_id, session_id); } catch(e){ rows = []; }
-  return {
-    ok: true,
-    active: info.active,
-    phase: info.phase,
-    session_id_resolved: info.session_id,
-    input_session_id: session_id,
-    counts: {
-      total_for_session: Array.isArray(rows) ? rows.length : 0,
-      visible_writing: Array.isArray(rows) ? rows.filter(r =>
-        String(r.is_hidden).toLowerCase() !== 'true' &&
-        String(r.phase_at_submit || '').toLowerCase() === 'writing'
-      ).length : 0
-    }
-  };
-}
 /**
  * Feedback received on this student's own responses. Locked (empty) until they have
  * completed all their assigned reviews; this is enforced here, not just in the page.
@@ -1569,37 +1309,13 @@ function apiGetMyFeedback(session_id, reviewer_token) {
   return { ok:true, locked:false, feedback };
 }
 
+/** POST (e.g. an LMS launch) is routed like GET; e.parameter includes posted form fields */
 function doPost(e) {
   try {
-    const email = '';
-
-    const params = (e && e.parameter) ? e.parameter : {};
-
-    // Page routing (default to student)
-    const pageRaw = params.page ? String(params.page) : 'student';
-    const page = pageRaw.toLowerCase();
-
-    if (page === 'student') {
-      const t = HtmlService.createTemplateFromFile('student');
-      // Prefer posted values; otherwise blank (student.html will also try URL/getLocation fallbacks).
-      t.inst = params.inst ? String(params.inst) : '';
-      t.exec = ScriptApp.getService().getUrl();
-
-      // Pick whichever field Canvas actually sent (legacy; safe to keep)
-      const cid = params.canvas_id || params.custom_canvas_id || params.user_id || params.login_id || '';
-      t.canvas_id = String(cid || '');
-
-      // NEW: pass the authenticated email (preferred ID)
-      t.email = String(email || '');
-
-      return t.evaluate()
-        .setTitle('Class Response')
-        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-    }
-    // For any other pages, just delegate to GET routing (keeps behavior consistent)
     return doGet(e);
   } catch (err) {
-    return HtmlService.createHtmlOutput('<p>POST error: ' + String(err && err.message || err) + '</p>')
+    const msg = String(err && err.message || err).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    return HtmlService.createHtmlOutput('<p>POST error: ' + msg + '</p>')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 }

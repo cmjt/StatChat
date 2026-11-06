@@ -63,7 +63,6 @@
       word-break: break-word;
     }
     .card [contenteditable="true"] {background: #ffffff;padding: 8px;border-radius: 6px;overflow-wrap: anywhere;word-break: break-word;}
-    ./*card {border: 2px solid rgba(0,0,0,0.08); box-shadow: 0 2px 6px rgba(0,0,0,0.08); border-radius: 8px; padding: 12px; }*/
     .card.boardItem { position: absolute; box-sizing: border-box; }
     .hidden { opacity: 0.4; }
     .pinned { border-color: #0a7; }
@@ -115,6 +114,7 @@
       color: #ffffff;
       border: 1px solid #1e3a8a;
     }
+    .badge.flag { background:#fef3c7; color:#92400e; border:1px solid #f59e0b; margin-left:0; margin-right:6px; }
     /* Delete button */
     .pinBtn { cursor:pointer; background:none; border:none; padding:2px 6px; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
     .pinBtn svg{ width:18px; height:18px; stroke:#666; fill:none; stroke-width:1.8; transition:all 140ms ease; }
@@ -177,6 +177,11 @@
           <label style="min-width:160px;">Session ID</label>
           <input id="newSessionId" placeholder="e.g., week_01_lec_02" style="flex:1;">
         </div>
+        <div class="row" style="margin-top:8px;">
+          <label for="sessionDuration" style="min-width:160px;">Writing open for</label>
+          <input id="sessionDuration" type="number" min="1" max="1440" value="60" style="width:80px;">
+          <span>mins</span>
+        </div>
 
         <div style="margin-top:12px;">
           <button id="startBtn" type="submit" class="btn btn-view" aria-label="Start session" title="Start session">🔓<span class="btn-label">Open</span></button>
@@ -228,7 +233,6 @@
         <button type="button" class="btn btn-stop" onclick="stopSession()" aria-label="Stop session" title="Close writing now. Peer review continues until its deadline.">⏹<span class="btn-label">Stop session</span></button>
       </span>
 
-      <!-- <span id="debugChip" class="debugChip"></span> -->
     </header>
     
     <!-- Poll (first-word tally) -->
@@ -262,8 +266,7 @@
     // View mode: 'cards' (default) or 'poll'
     let DASH_VIEW_MODE = 'cards';
 
-    // 🔒 Write-in-flight flag + per-row local write timestamps
-    let WRITE_IN_FLIGHT = false;
+    // Per-row local write timestamps, so a Refresh doesn't revert a fresher local edit
     const TAG_WRITE_TS = Object.create(null); // { response_id: unix_ms_of_local_tag_write }
     const POS_WRITE_TS = Object.create(null); // { response_id: unix_ms_of_local_pos_write }
     const COLLAPSE_STATE = {}; // tags area open/closed per response
@@ -285,7 +288,6 @@
       pollPanel.style.display = 'block';
       render();
       renderConfidence();
-      bumpDebugChip();
     }
 
     function setViewCards(){
@@ -298,7 +300,6 @@
       pollPanel.style.display = 'none';
       render();
       renderConfidence();
-      bumpDebugChip();
     }
 
     // Tag groups
@@ -313,6 +314,11 @@
     function escapeHtml(s){
       s = String(s || '');
       return s.replace(/[&<>"']/g, (m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
+    }
+
+    // Shown when profanity_action is "flag" and the text contained a listed term
+    function flagBadgeHTML(flagged){
+      return flagged ? '<span class="badge flag" title="Contains a term from ProfanityList">⚠ Flagged</span> ' : '';
     }
 
     function confidenceBadgeHTML(conf){
@@ -353,17 +359,15 @@
 
     // --- Start + Login ---
     function handleLoginAndStart() {
-      console.log("LOGIN STARTED");
       const btn = document.getElementById('startBtn');
       const msg = document.getElementById('startMsg');
       msg.textContent = '';
       btn.disabled = true;
 
       const inst = (document.getElementById('inst').value || '').trim();
-      const pw = (document.getElementById('instPw').value || '').trim();
+      const pw = document.getElementById('instPw').value || ''; // not trimmed: spaces may be part of the password
       const sessionId = (document.getElementById('newSessionId').value || '').trim();
-      //const duration_mins = parseInt(document.getElementById('sessionDuration').value, 10) || 30;
-      const duration_mins = 60;
+      const duration_mins = Math.min(1440, Math.max(1, parseInt(document.getElementById('sessionDuration').value, 10) || 60));
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
       if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
@@ -424,7 +428,6 @@
       HISTORY_WINDOW_MINS = isNaN(val) ? 5 : Math.max(0, val);
       render();            // re-render cards with new window
       renderConfidence();  // update the confidence chart
-      bumpDebugChip();     // keep the debug chip in sync
     }
     
     function openPeerReview(){
@@ -433,9 +436,6 @@
         alert('Missing instructor or session. Start a session first.');
         return;
       }
-      // Use the current "Show last X mins" as the peer window
-      const minsInput = document.getElementById('historyMins');
-      const mins = Math.max(1, Number(minsInput ? minsInput.value : HISTORY_WINDOW_MINS || 5));
       // Reviews per student
       const kInput = document.getElementById('peerK');
       const k = Math.max(1, Number(kInput ? kInput.value : 1) || 1);
@@ -457,13 +457,12 @@
           }
           // Reflect locally that we've switched to review, then pull the authoritative state
           CURRENT_PHASE = 'review';
-          bumpDebugChip();
           refreshSessionState();
         })
         .withFailureHandler(err => {
           if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
         })
-        .apiStartPeerReview(AUTH_TOKEN, currentSessionId, mins, k, peerUntilIso);
+        .apiStartPeerReview(AUTH_TOKEN, currentSessionId, k, peerUntilIso);
     }
 
     // --- Review deadline helpers ---
@@ -537,7 +536,7 @@
           // session or the review deadline has passed
           CURRENT_PHASE = (info.peer_open || info.phase === 'review') ? 'review' : 'writing';
           renderSessionState();
-          if (CURRENT_PHASE !== before) { render(); bumpDebugChip(); }
+          if (CURRENT_PHASE !== before) { render(); }
         })
         .withFailureHandler(err => {
           document.getElementById('refreshStatus').textContent =
@@ -577,7 +576,6 @@
         .withSuccessHandler(() => {
           CURRENT_PHASE = 'writing';
           render();
-          bumpDebugChip();
           refreshSessionState();
         })
         .withFailureHandler(err => {
@@ -601,7 +599,7 @@
         .apiStopSession(AUTH_TOKEN, currentSessionId);
     }
 
-    // --- Load responses (auto refresh only) ---
+    // --- Load responses (on login and when Refresh is clicked) ---
     function loadResponses(){
       document.getElementById('refreshStatus').textContent =
   'Refreshing...';
@@ -641,13 +639,11 @@
 
           render();
           renderConfidence();
-          bumpDebugChip();
 
           // Pull batched peer feedback for this session, then re-render
           if (INSTRUCTOR_ID && currentSessionId) {
             google.script.run
               .withSuccessHandler(fb => {
-                console.log("FEEDBACK SUMMARY", fb);
                 const server = (fb && fb.ok && fb.byResponse) ? fb.byResponse : {};
                 // Start with fresh server snapshot
                 FEEDBACK_BY_RESPONSE = server;
@@ -752,14 +748,6 @@
            Shows all reviews for the card, regardless of the "Show last X mins" window.
            Persist the open/closed state per response via REVIEWS_COLLAPSE_STATE. */
         let reviewsHTML = '';
-        console.log(
-          "CURRENT_PHASE:",
-          CURRENT_PHASE,
-          "Response:",
-          r.response_id,
-          "Feedback:",
-          FEEDBACK_BY_RESPONSE[String(r.response_id)]
-        );
         if (CURRENT_PHASE === 'review') {
           const rid = String(r.response_id);
           const fbSum = FEEDBACK_BY_RESPONSE[rid] || { count: 0, items: [] };
@@ -790,7 +778,7 @@
 
             return `
               <div class="peerFbItem" style="padding:6px 8px; border:1px solid #eee; border-radius:6px; background:#fafafa; margin-top:6px;">
-                ${safe}
+                ${flagBadgeHTML(it && it.flagged)}${safe}
                 <div class="revTagRow" data-feedback-key="${key}">
                   ${buttons}
                 </div>
@@ -813,7 +801,7 @@
           <div class="rowTop">
             <span class="leftTop">
               <span class="drag">⋮⋮</span>
-              <small>${confidenceBadgeHTML(r.confidence)}</small>
+              <small>${confidenceBadgeHTML(r.confidence)}${flagBadgeHTML(r.profanity_flag === 'FLAGGED')}</small>
             </span>
             <span class="rightTop">
               ${deleteOutlineSVG()}
@@ -946,7 +934,6 @@
               if (rLocal) { rLocal.pos_x = nx; rLocal.pos_y = ny; }
 
               // Record local write timestamp so a refresh doesn't revert the move
-              WRITE_IN_FLIGHT = true;
               POS_WRITE_TS[String(r.response_id)] = Date.now();
 
               savePosition(r.response_id, nx, ny);
@@ -1011,26 +998,17 @@
           });
         }
         const summary = cardEl.querySelector('.tagRow .tagSummary');
-        if (summary) summary.textContent = 'Tags: ' + (r.tags || '');
+        if (summary) summary.textContent = 'Indicators: ' + (r.tags || '');
       }
 
       // Record local write timestamp so a refresh doesn't revert the tag
-      WRITE_IN_FLIGHT = true;
       TAG_WRITE_TS[String(responseId)] = Date.now();
 
       // Persist to server
       google.script.run
-        .withSuccessHandler((updatedRow) => {
-          if (updatedRow && String(updatedRow.response_id) === String(responseId)) {
-            Object.assign(r, updatedRow);
-            if (cardEl) resyncCardTagsUI(cardEl, r.tags);
-          }
-          // Small delay to let Sheets become consistent before resuming refresh
-          setTimeout(() => { WRITE_IN_FLIGHT = false;}, 600);
-        })
+        .withSuccessHandler(() => { /* saved */ })
         .withFailureHandler(err => {
           alert('Save failed: ' + (err && err.message ? err.message : err));
-          WRITE_IN_FLIGHT = false;
         })
         .apiUpdateResponse(AUTH_TOKEN, responseId, { tags: next });
     };
@@ -1054,7 +1032,7 @@
         if (it) it.quality = quality;
       }
 
-      // 🔒 NEW: record/refresh the local override with a timestamp
+      // Record/refresh the local override with a timestamp
       if (!LOCAL_REVIEW_QUALITY[rid]) LOCAL_REVIEW_QUALITY[rid] = Object.create(null);
       LOCAL_REVIEW_QUALITY[rid][String(feedbackKey)] = { quality: String(quality || ''), ts: Date.now() };
 
@@ -1090,7 +1068,7 @@
         if (!ok) return;
         if (cardEl && cardEl.parentNode) cardEl.parentNode.removeChild(cardEl);
         google.script.run
-          .withSuccessHandler(()=>{ /* auto-refresh will pick up next tick */ })
+          .withSuccessHandler(()=>{ /* picked up on next Refresh */ })
           .withFailureHandler(err=>{ alert('Delete failed: ' + (err && err.message ? err.message : err)); })
           .apiUpdateResponse(AUTH_TOKEN, responseId, { is_hidden: 'TRUE' });
       });
@@ -1110,19 +1088,10 @@
         .apiUpdateResponse(AUTH_TOKEN, id, { response_text_edited: next });
     }
     function savePosition(id, x, y){
-      // Persist position; keep using the write-in-flight pause set at drag end
       google.script.run
-        .withSuccessHandler((updatedRow)=>{
-          const r = RESPONSES.find(rr => String(rr.response_id) === String(id));
-          if (updatedRow && r) {
-            Object.assign(r, updatedRow);
-          }
-          // Small delay to let Sheets become consistent before resuming refresh
-          setTimeout(() => { WRITE_IN_FLIGHT = false; }, 600);
-        })
+        .withSuccessHandler(() => { /* saved */ })
         .withFailureHandler(err=>{
           alert('Save failed: ' + (err && err.message ? err.message : err));
-          WRITE_IN_FLIGHT = false;
         })
         .apiUpdateResponse(AUTH_TOKEN, id, { pos_x: x, pos_y: y });
     }
@@ -1265,14 +1234,6 @@
         ctx.fillStyle = '#444'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
         ctx.fillText(String(i+1), x + bw/2, pad.top + H + 6);
       }
-    }
-
-    // --- Debug chip (lightweight status) ---
-    function bumpDebugChip(){
-      const el = document.getElementById('debugChip');
-      if (!el) return;
-      const asOK = inAppsScript() ? '✓' : '✗';
-      el.textContent = `AS ${asOK} · Phase: ${CURRENT_PHASE} · Rows: ${RESPONSES.length} · Window: ${HISTORY_WINDOW_MINS}m · Session: ${currentSessionId||'—'}`;
     }
 
     // Responsive columns on resize (grid items)

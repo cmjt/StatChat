@@ -193,8 +193,6 @@
     <!-- Submit -->
     <div style="margin-top:12px;">
       <button id="submitBtn" onclick="submitResponse()" class="btn btn-view" aria-label="Submit" title="Submit">➤<span class="btn-label">Submit</span></button>
-      <!-- Review navigation button kept hidden; students need not navigate away -->
-      <button id="reviewBtn" style="margin-left:8px; display:none;" onclick="goToReview()">Peer review (projector)</button>
       <span id="status" class="status"></span>
     </div>
 
@@ -237,20 +235,18 @@
     const MIN_FEEDBACK_WORDS = 10; // must match the check in apiSubmitPeerFeedback (Code.gs)
 
     const SERVER_INST = '<?= inst ?>';
-    const SERVER_EXEC = '<?= exec ?>';
 
     // Static peer view: one-time assignments + cache
     let ASSIGNMENTS_LOADED = false;
     let ASSIGNED_IDS = [];
 
-    let REVIEWER_TOKEN = localStorage.getItem('reviewer_token');
-
+    // Anonymous per-browser ID. If storage is blocked, fall back to a per-page-load ID
+    // (the student then can't come back later to see their feedback).
+    let REVIEWER_TOKEN = '';
+    try { REVIEWER_TOKEN = localStorage.getItem('reviewer_token') || ''; } catch (e) {}
     if (!REVIEWER_TOKEN) {
-      REVIEWER_TOKEN =
-        Date.now().toString(36) +
-        Math.random().toString(36).substring(2);
-
-      localStorage.setItem('reviewer_token', REVIEWER_TOKEN);
+      REVIEWER_TOKEN = Date.now().toString(36) + Math.random().toString(36).substring(2);
+      try { localStorage.setItem('reviewer_token', REVIEWER_TOKEN); } catch (e) {}
     }
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('submitBtn').disabled = false;
@@ -384,7 +380,6 @@
     document.querySelectorAll('.conf-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const val = Number(btn.dataset.value);
-        selectedConfidence = val;
         // Update hidden input so workflow still works
         document.getElementById('confidence').value = val;
         document.getElementById('confVal').textContent = val === 0 ? "N/A" : val;
@@ -405,15 +400,13 @@
       document.getElementById('submitBtn').disabled = true;
 
       const payload = { response_text_original: text, 
-      reviewer_token: reviewerToken, confidence: conf, is_poll: false, poll_value_normalized: '' };
+      reviewer_token: reviewerToken, confidence: conf };
 
       google.script.run
         .withSuccessHandler(res=>{
           if (res && res.ok) {
             document.getElementById('responseText').value = '';
             setStatus('Submitted. Thank you!', false);
-            try { sessionStorage.setItem('reviewer_token', REVIEWER_TOKEN);} catch(e){}
-            const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
           } else {
             setStatus(res && res.error ? res.error : 'Submission failed.', true);
           }
@@ -425,8 +418,6 @@
               if (res2 && res2.ok) {
                 document.getElementById('responseText').value = '';
                 setStatus('Submitted. Thank you!', false);
-                try { sessionStorage.setItem('reviewer_token', REVIEWER_TOKEN); } catch(e){}
-                const btn = document.getElementById('reviewBtn'); if (btn) btn.style.display = 'none';
               } else {
                 setStatus(res2 && res2.error ? res2.error : 'Submission failed.', true);
               }
@@ -443,7 +434,7 @@
 
     // Inline peer review
     function maybeLoadAssignments(){
-      const uid = (sessionStorage.getItem('reviewer_token') ||REVIEWER_TOKEN).trim();
+      const uid = REVIEWER_TOKEN;
       const reviewEl = document.getElementById('reviewPanel');
       if (!uid || !SESSION_ID) { reviewEl.style.display = 'none'; return; }
 
@@ -465,10 +456,8 @@
     }
 
     function loadAssignedReviewTasks(uid){
-      console.log("LOAD TASKS UID:", uid);
       google.script.run
         .withSuccessHandler(function(assign){
-          console.log("ASSIGN RESULT:", assign);
           const cont = document.getElementById('assignments');
           cont.innerHTML = '';
           const ids = (assign && assign.ok && Array.isArray(assign.assigned)) ? assign.assigned : [];
@@ -482,11 +471,9 @@
           // fetch completed list to gray out/disable
           google.script.run
             .withSuccessHandler(function(done){
-              console.log("COMPLETED RESULT:", done);
               const completed = (done && done.ok && Array.isArray(done.completed)) ? new Set(done.completed) : new Set();
 
               ids.forEach(rid=>{
-                console.log("Creating card for:", rid);
                 const card = document.createElement('div'); card.className='card';
                 const isDone = completed.has(String(rid));
                 const locked = isDone || !REVIEWS_OPEN; // no new reviews after the deadline
@@ -514,7 +501,6 @@
                 // Fetch and inject the submission text for this assignment
                 google.script.run
                   .withSuccessHandler(res => {
-                    console.log("TEXT RESULT", rid, res);
                     const el = document.getElementById('snippet_' + rid);
                     if (!el) return;
                     if (res && res.ok && typeof res.text === 'string') {
@@ -531,25 +517,14 @@
                   .apiGetResponseText(SESSION_ID, rid);
                             });
 
-              // Show feedback panel only after assignments are loaded
-              const feedbackPanel =
-                document.getElementById('myFeedbackPanel');
-              const allDone =
-                ids.length > 0 &&
-                ids.every(id => completed.has(String(id)));
+              // Show the feedback panel once assignments are loaded: received feedback if
+              // all assigned reviews are done (the server checks this too), otherwise why not
+              const feedbackPanel = document.getElementById('myFeedbackPanel');
+              const allDone = ids.length > 0 && ids.every(id => completed.has(String(id)));
               if (feedbackPanel) {
-                feedbackPanel.style.display =
-                  allDone ? 'block' : 'none';
-              }
-              if (feedbackPanel) {
-              if (allDone) {
                 feedbackPanel.style.display = 'block';
-                loadMyFeedback();
-              } else {
-                feedbackPanel.style.display = 'block';
-                document.getElementById('myFeedback').innerHTML = lockedFeedbackMessage();
-
-                }
+                if (allDone) loadMyFeedback();
+                else document.getElementById('myFeedback').innerHTML = lockedFeedbackMessage();
               }
               ASSIGNMENTS_LOADED = true;
               ASSIGNED_IDS = ids.slice();
@@ -590,9 +565,7 @@
       ta.focus();
     }
     function submitFeedback(rid){
-      const uid = (
-      sessionStorage.getItem('reviewer_token') ||
-      REVIEWER_TOKEN).trim();
+      const uid = REVIEWER_TOKEN;
       const ta = document.getElementById('fb_' + rid);
       const txt = ta ? (ta.value || '').trim() : '';
       const btn = document.getElementById('btn_' + rid);
@@ -688,7 +661,7 @@
     // then load received feedback only once all of them are submitted.
     function refreshMyFeedback() {
       if (!SESSION_ID || !ASSIGNED_IDS.length) return;
-      const uid = (sessionStorage.getItem('reviewer_token') || REVIEWER_TOKEN).trim();
+      const uid = REVIEWER_TOKEN;
       google.script.run
         .withSuccessHandler(done => {
           const completed = new Set(
@@ -705,14 +678,6 @@
           setStatus('Refresh failed: ' + (err && err.message ? err.message : err), true);
         })
         .apiListFeedbackByReviewer(SESSION_ID, uid);
-    }
-    function goToReview(){
-      const u = new URL(location.href);
-      const inst = INSTRUCTOR_ID || u.searchParams.get('inst') || '';
-      if (!inst) { alert('Missing instructor ID. Please use the official link.'); return; }
-      const base = new URL(SERVER_EXEC || `${location.origin}${location.pathname}`);
-      base.searchParams.set('page', 'review'); base.searchParams.set('inst', inst);
-      location.assign(base.toString());
     }
   </script>
 </body>

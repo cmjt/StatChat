@@ -14,7 +14,8 @@ session. Peer review can carry on after the session until its own deadline.
 
 1. **Open**: the instructor logs in on the dashboard with a session ID. This
    creates the session (or reopens an existing one) with writing open for
-   60 minutes. Students can only submit responses while writing is open.
+   *Writing open for* minutes (default 60, set on the login screen). Students
+   can only submit responses while writing is open.
    - If the session is still active, or has peer review open (e.g. the
      instructor is back the next day to read reviews), its current phase is kept.
    - Otherwise a reused session ID is reset to **writing**.
@@ -39,7 +40,9 @@ Peer review rules, all enforced on the server:
 
 - Each student is assigned *Reviews per student* (default 1) responses from
   other students. They are never assigned their own, and never one the
-  instructor has hidden.
+  instructor has hidden. Any visible response in the session can be assigned.
+  Assignment is balanced: responses with the fewest reviewers are picked first,
+  so every response gets a reviewer before any gets a second.
 - A student can only review responses assigned to them, once each. Reviews
   need at least 10 words.
 - If the instructor hides a response after it was assigned, it stops counting
@@ -109,8 +112,6 @@ Recommended columns (features that use them are skipped if they're missing):
 - peer_opened_at — needed for students to see a peer review after the session ends
 - peer_required_reviews
 - peer_until — review deadline (added automatically when peer review is opened)
-- peer_window_mins
-- history_window_mins
 
 ---
 
@@ -164,6 +165,7 @@ Columns:
 - timestamp
 - is_hidden
 - review_quality — added automatically if missing
+- profanity_flag (optional) — `NONE`, `MASKED` or `FLAGGED`
 
 ---
 
@@ -194,7 +196,7 @@ header (e.g. `key`, `value`), and settings go in columns A and B from row 2.
 |---|---|---|
 | max_words | 200 | Maximum words in a response or peer review |
 | min_chars | 0 | Minimum characters in a response |
-| profanity_action | mask | `mask` (replace with emoji), `flag` (store but mark) or `block` (reject) |
+| profanity_action | mask | `mask` (replace with emoji), `flag` (keep the text but show a ⚠ Flagged badge on the dashboard) or `block` (reject). Applies to responses and peer reviews |
 
 ---
 
