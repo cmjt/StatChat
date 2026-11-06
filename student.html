@@ -266,6 +266,10 @@
       el.textContent = msg;
       el.className = 'status ' + (isError ? 'err' : 'ok');
     }
+    // Escape user-supplied text before inserting it with innerHTML
+    function escapeHtml(s){
+      return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
     function countWords(s){
       return String(s||'').trim().split(/\s+/).filter(Boolean).length;
     }
@@ -622,25 +626,13 @@
       google.script.run
         .withSuccessHandler(function(res){
           if (res && res.ok) {
-            // setStatus('Feedback submitted.', false);
-            loadMyFeedback();
             // Local-only UI update (no rebuild)
             if (ta) { ta.value = ''; ta.disabled = true; }
             if (btn) { btn.disabled = true; btn.textContent = 'Submitted'; }
             const card = ta?.closest('.card'); if (card) card.classList.add('completed');
 
-            // Check if all assigned are complete to show CSV
-            google.script.run
-              .withSuccessHandler(function(done){
-                const completed = (done && done.ok && Array.isArray(done.completed)) ? new Set(done.completed) : new Set();
-                const dlRow = document.getElementById('peerDownloadRow');
-                if (dlRow && ASSIGNED_IDS.length > 0) {
-                  const allDone = ASSIGNED_IDS.every(id => completed.has(String(id)));
-                  dlRow.style.display = allDone ? 'block' : 'none';
-                }
-              })
-              .withFailureHandler(_ => { /* ignore */ })
-              .apiListFeedbackByReviewer(SESSION_ID, uid);
+            // Unlock received feedback only once every assigned review is submitted
+            refreshMyFeedback();
 
           } else {
             setStatus((res && res.error) || 'Feedback failed.', true);
@@ -682,10 +674,10 @@
               border-radius:6px;
             ">
               <strong>Your response</strong><br>
-              ${f.response_text}
+              ${escapeHtml(f.response_text)}
             </div>
             <strong>Peer feedback</strong><br>
-            ${f.feedback}
+            ${escapeHtml(f.feedback)}
           </div>
         `).join('');
     })
@@ -700,16 +692,28 @@
     REVIEWER_TOKEN
   );
 }
+    // Re-check which assigned reviews are done (server is the source of truth),
+    // then load received feedback only once all of them are submitted.
     function refreshMyFeedback() {
-      const allDone =
-        ASSIGNED_IDS.length > 0 &&
-        ASSIGNED_IDS.every(id =>
-          COMPLETED_IDS.has(String(id))
-        );
-      if (!allDone) {
-        return;
-      }
-      loadMyFeedback();
+      if (!SESSION_ID || !ASSIGNED_IDS.length) return;
+      const uid = (sessionStorage.getItem('reviewer_token') || REVIEWER_TOKEN).trim();
+      google.script.run
+        .withSuccessHandler(done => {
+          const completed = new Set(
+            (done && done.ok && Array.isArray(done.completed)) ? done.completed.map(String) : []
+          );
+          const allDone = ASSIGNED_IDS.every(id => completed.has(String(id)));
+          if (allDone) {
+            loadMyFeedback();
+          } else {
+            document.getElementById('myFeedback').innerHTML =
+              '<div class="small">Submit all assigned peer reviews to unlock received feedback.</div>';
+          }
+        })
+        .withFailureHandler(err => {
+          setStatus('Refresh failed: ' + (err && err.message ? err.message : err), true);
+        })
+        .apiListFeedbackByReviewer(SESSION_ID, uid);
     }
     function goToReview(){
       const u = new URL(location.href);
