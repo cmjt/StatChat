@@ -395,74 +395,19 @@ function apiSubmitResponse(session_id, payload) {
   return { ok: true, response_id: id };
 }
 
-/** Legacy student API: disabled during review */
-function submitResponse(response_text, unique_id, class_access_code_unused, session_id, instructor_id_unused, confidence) {
-  const session = getSession(session_id);
-  if (!session) return { ok:false, error:'Invalid session.' };
-  if (!isSessionActive(session)) return { ok:false, error:'No active session. Please try again later.' };
-
-  const phase = getPhaseForSession(session);
-  if (phase === 'review') return { ok:false, error:'Writing is disabled during peer review.' };
-
-  const settings = getSettings();
-  const text = String(response_text || '').trim();
-  const words = text.split(/\s+/).filter(Boolean);
-
-  if (settings.max_words && words.length > settings.max_words) {
-    return { ok:false, error:`Please keep to ${settings.max_words} words.` };
+/** Legacy student API (fallback used by student.html when apiSubmitResponse fails).
+ *  Delegates to apiSubmitResponse so validation, profanity handling and locking stay
+ *  identical, but returns {ok:false, error} instead of throwing. */
+function submitResponse(response_text, reviewer_token, class_access_code_unused, session_id, instructor_id_unused, confidence) {
+  try {
+    return apiSubmitResponse(session_id, {
+      response_text_original: response_text,
+      reviewer_token: reviewer_token,
+      confidence: confidence
+    });
+  } catch (e) {
+    return { ok:false, error: String(e && e.message ? e.message : e) };
   }
-  if (text.length < settings.min_chars) {
-    return { ok:false, error:'Response too short.' };
-  }
-
-  const profList = getProfanityList();
-  const hasProf = hasProfanity(text, profList);
-  let response_text_masked = text;
-  let profanity_flag = 'NONE';
-  const action = (settings.profanity_action || 'mask').toLowerCase();
-  if (hasProf) {
-    if (action === 'block') {
-      return { ok:false, error:'Your response contains disallowed terms.' };
-    } else if (action === 'mask') {
-      response_text_masked = maskProfanity(text, profList);
-      profanity_flag = 'MASKED';
-    } else {
-      return { ok:true, response_id: writeResponse_({
-        session_id,
-        reviewer_token: String(reviewer_token || ''),
-        response_text_original: text,
-        response_text_edited: '',
-        is_poll: 'FALSE',
-        poll_value_normalized: '',
-        is_hidden: 'FALSE',
-        is_pinned: 'FALSE',
-        order_weight: '',
-        profanity_flag: 'FLAGGED',
-        confidence: Number(confidence || '') || '',
-        tags: '',
-        phase_at_submit: phase
-      }) };
-    }
-  }
-
-  const rowPayload = {
-    session_id,
-    reviewer_token: String(reviewer_token || ''),
-    response_text_original: text,
-    response_text_edited: (profanity_flag === 'MASKED') ? response_text_masked : '',
-    is_poll: 'FALSE',
-    poll_value_normalized: '',
-    is_hidden: 'FALSE',
-    is_pinned: 'FALSE',
-    order_weight: '',
-    profanity_flag,
-    confidence: Number(confidence || '') || '',
-    tags: '',
-    phase_at_submit: phase
-  };
-
-  const id = writeResponse_(rowPayload);
-  return { ok:true, response_id:id };
 }
 
 // ===== INSTRUCTOR AUTH =====
