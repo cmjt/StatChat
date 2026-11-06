@@ -206,6 +206,7 @@
         <strong>Peer review</strong>
         Remember that everyone is doing their best. Make sure to provide constructive comments on others' work.
       </div>
+      <div id="reviewDeadline" class="small" style="margin-top:6px;"></div>
       <div id="assignments"></div>
     </div>
     <!-- Feedback Received Panel -->
@@ -230,9 +231,9 @@
     // --- State ---
     let INSTRUCTOR_ID = '';
     let SESSION_ID = '';
-    let ACTIVE_UNTIL = null;
     let CURRENT_PHASE = 'writing';
-    let LAST_PHASE = 'writing';
+    let REVIEWS_OPEN = false;  // peer review accepting submissions (before its deadline)
+    let PEER_UNTIL = '';       // review deadline (ISO) or '' for none
 
     const SERVER_INST = '<?= inst ?>';
     const SERVER_EXEC = '<?= exec ?>';
@@ -278,10 +279,10 @@
         `Words: ${countWords(document.getElementById('responseText').value)}`;
     });
 
-    function showPhaseToast(){
-      const el = document.getElementById('phaseToast');
-      if (!el) return;
-      el.style.display = 'block';
+    function formatDeadline(iso){
+      const d = iso ? new Date(iso) : null;
+      if (!d || isNaN(d.getTime())) return '';
+      return d.toLocaleString([], { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
     }
 
     function applyPhaseUI(){
@@ -289,40 +290,40 @@
       const submitBtn = document.getElementById('submitBtn');
       const reviewEl = document.getElementById('reviewPanel');
       const toastEl  = document.getElementById('phaseToast');
+      const deadlineEl = document.getElementById('reviewDeadline');
+      const feedbackPanel = document.getElementById('myFeedbackPanel');
 
       if (CURRENT_PHASE === 'review') {
-        textEl.placeholder = 'Peer review is active. Writing is temporarily disabled.';
+        textEl.placeholder = REVIEWS_OPEN
+          ? 'Peer review is active. Writing is temporarily disabled.'
+          : 'This session has ended. Writing is closed.';
         submitBtn.disabled = true;
         textEl.disabled = true;
         reviewEl.style.display = 'block';
+        if (feedbackPanel) feedbackPanel.style.display = 'none';
 
-        const feedbackPanel =
-          document.getElementById('myFeedbackPanel');
-
-        if (feedbackPanel) {
-          feedbackPanel.style.display = 'none';
+        const when = formatDeadline(PEER_UNTIL);
+        if (deadlineEl) {
+          deadlineEl.textContent = REVIEWS_OPEN
+            ? (when ? `Reviews can be submitted until ${when}.` : '')
+            : `Peer review has closed${when ? ' (' + when + ')' : ''}. You can still read feedback you received if you completed your reviews.`;
+        }
+        if (toastEl) {
+          toastEl.textContent = REVIEWS_OPEN ? 'Peer review is now open.' : 'Peer review has closed.';
+          toastEl.style.display = 'block';
         }
 
         maybeLoadAssignments();
-
-        if (toastEl) toastEl.style.display = 'block';
       } else { // writing
         textEl.placeholder = 'Write your answer…';
         submitBtn.disabled = false;
         textEl.disabled = false;
         reviewEl.style.display = 'none';
-        const feedbackPanel =
-        document.getElementById('myFeedbackPanel');
-        if (feedbackPanel) {
-          feedbackPanel.style.display = 'none';
-          }
+        if (feedbackPanel) feedbackPanel.style.display = 'none';
       }
     }
 
     function resolveSessionAndPhase(){
-      // If we are already in review and assignments loaded, do nothing (static view)
-      if (CURRENT_PHASE === 'review' && ASSIGNMENTS_LOADED) return;
-
       INSTRUCTOR_ID = (getParam('inst') || SERVER_INST || '').trim();
       document.getElementById('instLabel').textContent = INSTRUCTOR_ID || '—';
 
@@ -340,53 +341,28 @@
       document.getElementById('sessionStatus').textContent = 'Resolving…';
       google.script.run
         .withSuccessHandler(res=>{
-          if (!res || !res.active || !res.session_id) {
-            // No active writing session — try peer-review fallback
-            google.script.run
-              .withSuccessHandler(pr => {
-                if (pr && pr.ok && pr.session_id) {
-                  SESSION_ID = pr.session_id;
-                  ACTIVE_UNTIL = null;
-                  LAST_PHASE = CURRENT_PHASE;
-                  CURRENT_PHASE = 'review';
-                  document.getElementById('sessionLabel').textContent = SESSION_ID;
-                  document.getElementById('sessionStatus').textContent = 'Peer review';
-                  applyPhaseUI();
-                  showPhaseToast();
-                } else {
-                  document.getElementById('sessionStatus').textContent = 'No active session';
-                  setStatus('No active session right now. Please try again later.', true);
-                }
-              })
-              .withFailureHandler(err => {
-                document.getElementById('sessionStatus').textContent = 'No active session';
-                setStatus('No active session right now. Please try again later.', true);
-              })
-              .apiGetOpenPeerSessionForInstructor(INSTRUCTOR_ID);
+          if (!res || !res.ok || !res.session_id) {
+            document.getElementById('sessionStatus').textContent = 'No active session';
+            document.getElementById('submitBtn').disabled = true;
+            setStatus('No active session right now. Please try again later.', true);
             return;
           }
           SESSION_ID = res.session_id;
-          ACTIVE_UNTIL = res.active_until ? new Date(res.active_until) : null;
-          LAST_PHASE = CURRENT_PHASE;
-          CURRENT_PHASE = String(res.phase || 'writing').toLowerCase();
-            console.log(
-            "PHASE LOADED:",
-            CURRENT_PHASE
-          );
-          document.getElementById('sessionLabel').textContent = SESSION_ID;
-          document.getElementById('sessionStatus').textContent = 'Active';
-          applyPhaseUI();
+          CURRENT_PHASE = (res.phase === 'review') ? 'review' : 'writing';
+          REVIEWS_OPEN = !!res.reviews_open;
+          PEER_UNTIL = res.peer_until || '';
 
-          // Show toast when switching into review
-          if (LAST_PHASE !== 'review' && CURRENT_PHASE === 'review') {
-            showPhaseToast();
-          }
+          document.getElementById('sessionLabel').textContent = SESSION_ID;
+          document.getElementById('sessionStatus').textContent =
+            CURRENT_PHASE === 'writing' ? 'Active'
+            : (REVIEWS_OPEN ? 'Peer review' : 'Peer review closed');
+          applyPhaseUI();
         })
         .withFailureHandler(err=>{
           document.getElementById('sessionStatus').textContent = 'Error';
-          setStatus(String(err), true);
+          setStatus(String(err && err.message ? err.message : err), true);
         })
-        .apiGetActiveSessionForInstructor(INSTRUCTOR_ID);
+        .apiGetStudentView(INSTRUCTOR_ID);
     }
 
     (function init(){ resolveSessionAndPhase(); })();
@@ -480,7 +456,7 @@
             loadAssignedReviewTasks(uid);
           } else {
             reviewEl.style.display = 'none';
-            setStatus('Submit at least one response to participate in peer review.', true);
+            setStatus(REVIEWS_OPEN ? 'Submit at least one response to participate in peer review.' : 'Peer review has closed. You didn\'t submit a response in this session.', true);
           }
         })
         .withFailureHandler(err=>{ setStatus('Check failed: ' + (err && err.message ? err.message : err), true); })
@@ -495,7 +471,12 @@
           const cont = document.getElementById('assignments');
           cont.innerHTML = '';
           const ids = (assign && assign.ok && Array.isArray(assign.assigned)) ? assign.assigned : [];
-          if (!ids.length){ cont.innerHTML = '<div class="small">No assignments yet…</div>'; return; }
+          if (!ids.length){
+            cont.innerHTML = REVIEWS_OPEN
+              ? '<div class="small">No assignments yet…</div>'
+              : '<div class="small">Peer review closed before you were assigned any reviews, so received feedback isn\'t available.</div>';
+            return;
+          }
 
           // fetch completed list to gray out/disable
           google.script.run
@@ -507,23 +488,24 @@
                 console.log("Creating card for:", rid);
                 const card = document.createElement('div'); card.className='card';
                 const isDone = completed.has(String(rid));
-                card.classList.toggle('completed', isDone);
+                const locked = isDone || !REVIEWS_OPEN; // no new reviews after the deadline
+                card.classList.toggle('completed', locked);
                 card.innerHTML = `
                   <div><b>Response #${rid}</b></div>
                   <div id="snippet_${rid}" class="small" style="margin:6px 0; color:#444;">Loading text…</div>
-                  <textarea id="fb_${rid}" placeholder="Write feedback that is constructive, respectful, and supports shared understanding." rows="3" ${isDone ? 'disabled' : ''}></textarea>
+                  <textarea id="fb_${rid}" placeholder="Write feedback that is constructive, respectful, and supports shared understanding." rows="3" ${locked ? 'disabled' : ''}></textarea>
                   <div style="margin-top:8px;">
                     <button
                       type="button"
                       class="btn-bot"
                       onclick="markAsBot('${rid}')"
                       title="I think this may be AI-generated"
-                      ${isDone ? 'disabled' : ''}>
+                      ${locked ? 'disabled' : ''}>
                       🤖
                     </button>
                   </div>
                   <div style="margin-top:8px;">
-                    <button id="btn_${rid}" class="btn btn-view" onclick="submitFeedback('${rid}')" ${isDone ? 'disabled' : ''}>${isDone ? 'Submitted' : 'Submit feedback'}</button>
+                    <button id="btn_${rid}" class="btn btn-view" onclick="submitFeedback('${rid}')" ${locked ? 'disabled' : ''}>${isDone ? 'Submitted' : (REVIEWS_OPEN ? 'Submit feedback' : 'Closed')}</button>
                   </div>
                 `;
                 cont.appendChild(card);
@@ -564,23 +546,10 @@
                 loadMyFeedback();
               } else {
                 feedbackPanel.style.display = 'block';
-                document.getElementById('myFeedback').innerHTML =
-                  '<div class="small">Submit all assigned peer reviews to unlock received feedback.</div>';
+                document.getElementById('myFeedback').innerHTML = lockedFeedbackMessage();
 
                 }
               }
-              // After populating cards, show download CSV if all assigned are completed
-              const dlRow = document.getElementById('peerDownloadRow');
-
-              if (dlRow) {
-                const allDone =
-                  ids.length > 0 &&
-                  ids.every(id => completed.has(String(id)));
-
-                dlRow.style.display =
-                  allDone ? 'block' : 'none';
-              }
-
               ASSIGNMENTS_LOADED = true;
               ASSIGNED_IDS = ids.slice();
 
@@ -605,6 +574,12 @@
         );
     }
         
+    // Shown in place of received feedback when the student hasn't completed all their reviews
+    function lockedFeedbackMessage(){
+      return REVIEWS_OPEN
+        ? '<div class="small">Submit all assigned peer reviews to unlock received feedback.</div>'
+        : '<div class="small">Peer review has closed. Received feedback is only available to students who completed all their assigned reviews.</div>';
+    }
     function markAsBot(rid){
       const ta =
         document.getElementById('fb_' + rid);
@@ -706,8 +681,7 @@
           if (allDone) {
             loadMyFeedback();
           } else {
-            document.getElementById('myFeedback').innerHTML =
-              '<div class="small">Submit all assigned peer reviews to unlock received feedback.</div>';
+            document.getElementById('myFeedback').innerHTML = lockedFeedbackMessage();
           }
         })
         .withFailureHandler(err => {

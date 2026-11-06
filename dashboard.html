@@ -215,12 +215,17 @@
         <button type="button" class="btn btn-view" onclick="openPeerReview()" aria-label="Peer review" title="Peer review">👥<span class="btn-label">Peer review</span></button>
         <label for="peerK" style="margin-right:6px;">Reviews per student</label>
         <input id="peerK" type="number" min="1" value="1" style="width:64px;">
-        <button type="button" class="btn btn-view" onclick="backToWriting()" aria-label="Back to writing" title="Close peer review and reopen writing">✏️<span class="btn-label">Back to writing</span></button>
+        <label for="peerUntil" style="margin:0 6px 0 8px;" title="Optional. Students can submit reviews until this time, even after the session ends. Leave blank for no deadline.">Reviews close</label>
+        <input id="peerUntil" type="datetime-local" onchange="peerDeadlineChanged()" title="Optional. Leave blank for no deadline.">
+        <button type="button" class="btn btn-view" onclick="closeReviewsNow()" aria-label="Close reviews now" title="Stop accepting reviews now (received reviews stay visible)">🔒<span class="btn-label">Close reviews</span></button>
+        <button type="button" class="btn btn-view" onclick="backToWriting()" aria-label="Back to writing" title="End peer review and reopen writing">✏️<span class="btn-label">Back to writing</span></button>
         <span id="peerStatus" class="debugChip"></span>
       </span>
 
       <span style="margin-left:12px;">
-        <button type="button" class="btn btn-stop" onclick="stopSession()" aria-label="Stop session" title="Stop session and close peer review">⏹<span class="btn-label">Stop session</span></button>
+        <span id="writingState" class="debugChip"></span>
+        <button type="button" class="btn btn-view" onclick="extendWriting(30)" aria-label="Extend writing 30 minutes" title="Keep writing open for 30 more minutes (reopens it if stopped or expired)">⏱<span class="btn-label">+30 min</span></button>
+        <button type="button" class="btn btn-stop" onclick="stopSession()" aria-label="Stop session" title="Close writing now. Peer review continues until its deadline.">⏹<span class="btn-label">Stop session</span></button>
       </span>
 
       <!-- <span id="debugChip" class="debugChip"></span> -->
@@ -246,6 +251,7 @@
     // --- State ---
     let INSTRUCTOR_ID = '';
     let AUTH_TOKEN = ''; // issued by apiInstructorLogin; required by every instructor API call
+    let SESSION_STATE = null; // latest apiGetSessionState result for currentSessionId
     let currentSessionId = '';
 
     let RESPONSES = [];
@@ -434,6 +440,11 @@
       const kInput = document.getElementById('peerK');
       const k = Math.max(1, Number(kInput ? kInput.value : 2));
       const statusEl = document.getElementById('peerStatus');
+      const peerUntilIso = getPeerUntilIso();
+      if (peerUntilIso && new Date(peerUntilIso) <= new Date()) {
+        alert('The review deadline must be in the future (or leave it blank for no deadline).');
+        return;
+      }
 
       if (statusEl) statusEl.textContent = 'Opening...';
 
@@ -444,29 +455,130 @@
             if (statusEl) statusEl.textContent = (res && res.error) ? ('Error: ' + res.error) : 'Failed to open';
             return;
           }
-          if (statusEl) statusEl.textContent = `Open ✓ · peers=${k}`;
-          // Reflect locally that we've switched to review
+          // Reflect locally that we've switched to review, then pull the authoritative state
           CURRENT_PHASE = 'review';
           bumpDebugChip();
+          refreshSessionState();
         })
         .withFailureHandler(err => {
           if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
         })
-        .apiStartPeerReview(AUTH_TOKEN, currentSessionId, mins, k);
+        .apiStartPeerReview(AUTH_TOKEN, currentSessionId, mins, k, peerUntilIso);
+    }
+
+    // --- Review deadline helpers ---
+    // datetime-local values are in the browser's local time; convert to/from ISO (UTC)
+    function getPeerUntilIso(){
+      const v = (document.getElementById('peerUntil').value || '').trim();
+      if (!v) return '';
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? '' : d.toISOString();
+    }
+    function toLocalInputValue(iso){
+      const d = iso ? new Date(iso) : null;
+      if (!d || isNaN(d.getTime())) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    function fmtWhen(iso){
+      const d = iso ? new Date(iso) : null;
+      if (!d || isNaN(d.getTime())) return '';
+      const sameDay = d.toDateString() === new Date().toDateString();
+      return sameDay
+        ? d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+        : d.toLocaleString([], { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+    }
+
+    // Changing the deadline while peer review is open saves it immediately
+    function peerDeadlineChanged(){
+      if (!SESSION_STATE || !SESSION_STATE.peer_open) return; // used when peer review is opened
+      const iso = getPeerUntilIso();
+      if (iso && new Date(iso) <= new Date()) {
+        alert('The review deadline must be in the future. Use "Close reviews" to close them now.');
+        refreshSessionState();
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(() => refreshSessionState())
+        .withFailureHandler(err => {
+          alert('Could not change deadline: ' + (err && err.message ? err.message : err));
+          refreshSessionState();
+        })
+        .apiSetPeerDeadline(AUTH_TOKEN, currentSessionId, iso);
+    }
+
+    function closeReviewsNow(){
+      if (!currentSessionId) return;
+      if (!SESSION_STATE || !SESSION_STATE.peer_open) { alert('Peer review is not open.'); return; }
+      if (!confirm('Stop accepting peer reviews now? Students (and you) can still read reviews already submitted.')) return;
+      google.script.run
+        .withSuccessHandler(() => refreshSessionState())
+        .withFailureHandler(err => alert('Could not close reviews: ' + (err && err.message ? err.message : err)))
+        .apiCloseReviews(AUTH_TOKEN, currentSessionId);
+    }
+
+    function extendWriting(mins){
+      if (!currentSessionId) return;
+      google.script.run
+        .withSuccessHandler(() => refreshSessionState())
+        .withFailureHandler(err => alert('Could not extend: ' + (err && err.message ? err.message : err)))
+        .apiExtendSession(AUTH_TOKEN, currentSessionId, mins);
+    }
+
+    // Fetch the state of the session on screen and update phase + status chips
+    function refreshSessionState(){
+      if (!AUTH_TOKEN || !currentSessionId) return;
+      google.script.run
+        .withSuccessHandler(info => {
+          if (!info || !info.ok) return;
+          SESSION_STATE = info;
+          const before = CURRENT_PHASE;
+          // Show reviews whenever peer review exists for this session, even after the
+          // session or the review deadline has passed
+          CURRENT_PHASE = (info.peer_open || info.phase === 'review') ? 'review' : 'writing';
+          renderSessionState();
+          if (CURRENT_PHASE !== before) { render(); bumpDebugChip(); }
+        })
+        .withFailureHandler(err => {
+          document.getElementById('refreshStatus').textContent =
+            'Error: ' + (err && err.message ? err.message : err);
+        })
+        .apiGetSessionState(AUTH_TOKEN, currentSessionId);
+    }
+
+    function renderSessionState(){
+      const st = SESSION_STATE;
+      if (!st) return;
+      const writingEl = document.getElementById('writingState');
+      if (writingEl) {
+        writingEl.textContent = !st.writing_open ? 'Writing closed'
+          : (st.phase === 'review' ? 'Writing paused (peer review)' : `Writing open until ${fmtWhen(st.active_until)}`);
+      }
+      const peerEl = document.getElementById('peerStatus');
+      if (peerEl) {
+        if (!st.peer_open) peerEl.textContent = '';
+        else if (st.reviews_open) peerEl.textContent = st.peer_until ? `Reviews open until ${fmtWhen(st.peer_until)}` : 'Reviews open (no deadline)';
+        else peerEl.textContent = `Reviews closed${st.peer_until ? ' ' + fmtWhen(st.peer_until) : ''}`;
+      }
+      // Mirror the saved deadline in the input, unless the instructor is editing it
+      const input = document.getElementById('peerUntil');
+      if (input && document.activeElement !== input && st.peer_open) {
+        input.value = toLocalInputValue(st.peer_until);
+      }
     }
 
     // Close peer review and return the session to the writing phase
     function backToWriting(){
       if (!INSTRUCTOR_ID || !currentSessionId) return;
-      if (!confirm('Close peer review and reopen writing? Students need to reload their page to see the change.')) return;
+      if (!confirm('End peer review and reopen writing? Students can no longer submit or read reviews for this session. Students need to reload their page to see the change.')) return;
       const statusEl = document.getElementById('peerStatus');
       if (statusEl) statusEl.textContent = 'Closing...';
       google.script.run
         .withSuccessHandler(() => {
-          if (statusEl) statusEl.textContent = 'Peer review closed';
           CURRENT_PHASE = 'writing';
           render();
           bumpDebugChip();
+          refreshSessionState();
         })
         .withFailureHandler(err => {
           if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
@@ -474,25 +586,15 @@
         .apiSetPhase(AUTH_TOKEN, currentSessionId, 'writing');
     }
 
-    // Stop the session entirely (closes writing and peer review) and return to login
+    // Stop the session: closes writing now. Peer review (if open) continues until its deadline.
     function stopSession(){
       if (!INSTRUCTOR_ID || !currentSessionId) return;
-      if (!confirm(`Stop session "${currentSessionId}"? Students will no longer be able to submit or review.`)) return;
+      const peerNote = (SESSION_STATE && SESSION_STATE.reviews_open)
+        ? ' Peer review stays open until its deadline (use "Close reviews" to close it now).'
+        : '';
+      if (!confirm(`Stop session "${currentSessionId}"? Students will no longer be able to submit responses.${peerNote}`)) return;
       google.script.run
-        .withSuccessHandler(() => {
-          CURRENT_PHASE = 'writing';
-          RESPONSES = [];
-          FEEDBACK_BY_RESPONSE = {};
-          currentSessionId = '';
-          document.getElementById('peerStatus').textContent = '';
-          document.getElementById('listView').innerHTML = '';
-          document.getElementById('dashView').style.display = 'none';
-          document.getElementById('loginView').style.display = 'block';
-          const msg = document.getElementById('startMsg');
-          msg.style.color = '#0a7';
-          msg.textContent = 'Session stopped.';
-          document.getElementById('startBtn').disabled = false;
-        })
+        .withSuccessHandler(() => refreshSessionState())
         .withFailureHandler(err => {
           alert('Stop failed: ' + (err && err.message ? err.message : err));
         })
@@ -572,23 +674,8 @@
               .apiListFeedbackSummary(AUTH_TOKEN, currentSessionId);
           }
 
-          // Sync CURRENT_PHASE from server so reviews appear/disappear automatically
-          if (INSTRUCTOR_ID) {
-            google.script.run
-              .withSuccessHandler(info => {
-                if (info && info.ok) {
-                  const phase = String(info.phase || 'writing').toLowerCase();
-                  const before = CURRENT_PHASE;
-                  CURRENT_PHASE = (phase === 'review') ? 'review' : 'writing';
-                  if (CURRENT_PHASE !== before) {
-                    render();
-                    bumpDebugChip();
-                  }
-                }
-              })
-              .withFailureHandler(_ => { /* non-fatal */ })
-              .apiGetActiveSessionForInstructor(INSTRUCTOR_ID);
-          }
+          // Sync phase and writing/review status for the session on screen
+          refreshSessionState();
         })
         .withFailureHandler(err=>{
           console.error('Load failed:', err);
@@ -661,8 +748,8 @@
                           onclick="event.stopPropagation(); addTagExclusive('${r.response_id}','reason','${t}', this)">${t}</button>`;
         }).join('');
 
-        /* Reviews block — show ONLY when peer review is OPEN (CURRENT_PHASE === 'review')
-           Also apply the same "Show last X mins" window to the counter and visible items.
+        /* Reviews block — shown whenever the session has peer review (open or past its deadline).
+           Shows all reviews for the card, regardless of the "Show last X mins" window.
            Persist the open/closed state per response via REVIEWS_COLLAPSE_STATE. */
         let reviewsHTML = '';
         console.log(
@@ -676,9 +763,9 @@
         if (CURRENT_PHASE === 'review') {
           const rid = String(r.response_id);
           const fbSum = FEEDBACK_BY_RESPONSE[rid] || { count: 0, items: [] };
-          const windowedItems = Array.isArray(fbSum.items)
-            ? fbSum.items.filter(it => withinWindow(it.timestamp))
-            : [];
+          // All reviews for the card (not limited by "Show last"), so reviews submitted
+          // after class are still visible
+          const windowedItems = Array.isArray(fbSum.items) ? fbSum.items : [];
           const fbCount = windowedItems.length;
 
           // Remembered open/closed state (default closed)

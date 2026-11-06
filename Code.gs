@@ -6,9 +6,6 @@ const SHEET_SETTINGS    = 'Settings';
 const SHEET_PROFANITY   = 'ProfanityList'; 
 const SHEET_PEER_FEEDBACK    = 'PeerFeedback';
 const SHEET_PEER_ASSIGNMENTS = 'PeerAssignments';
-// Students whose instructor has no active session fall back to an open peer review,
-// but only if it was opened within this many hours (stops stale reviews lingering forever).
-const PEER_FALLBACK_MAX_HOURS = 12;
 
 // ===== LOCKING =====
 /** Run fn while holding the script lock so concurrent writers can't collide
@@ -198,8 +195,38 @@ function apiGetSignedInIdentity() {
   };
 }
 
+// ===== SESSION STATE =====
+// Writing and peer review have independent lifetimes:
+//   - Writing is open while the session is active: is_active = TRUE and now < active_until.
+//   - Peer review is open for submissions while peer_open = TRUE and now < peer_until
+//     (blank peer_until = no deadline). This can outlast the session itself.
+//   - After the deadline (peer_open still TRUE), the review is read-only: students who
+//     completed their assigned reviews can still see the feedback they received.
+
+/** Writing is open: session flagged active and not past active_until */
 function isSessionActive(session) {
-  return !!session;
+  if (!session) return false;
+  if (!prBool(session.is_active)) return false;
+  const until = prParseDate(session.active_until);
+  return !!(until && !isNaN(until.getTime()) && new Date() < until);
+}
+/** Review deadline as a Date, or null if there is none */
+function getPeerUntil_(session) {
+  const d = session ? prParseDate(session.peer_until) : null;
+  return (d && !isNaN(d.getTime())) ? d : null;
+}
+/** Peer review is accepting submissions */
+function areReviewsOpen_(session) {
+  if (!session || !prBool(session.peer_open)) return false;
+  const until = getPeerUntil_(session);
+  return !until || new Date() < until;
+}
+/** Parse an ISO deadline from the client: '' -> null (no deadline); invalid -> throws */
+function parseDeadline_(iso) {
+  if (iso === undefined || iso === null || String(iso).trim() === '') return null;
+  const d = new Date(String(iso));
+  if (isNaN(d.getTime())) throw new Error('Invalid review deadline.');
+  return d;
 }
 /** Phases: only 'writing' or 'review' */
 function getPhaseForSession(session) {
@@ -341,7 +368,7 @@ function json(obj) {
 function apiSubmitResponse(session_id, payload) {
   const session = getSession(session_id);
   if (!session) throw new Error('Session not found.');
-  if (!isSessionActive(session)) throw new Error('No active session. Please try again later.');
+  if (!isSessionActive(session)) throw new Error('This session has ended, so new responses are closed.');
 
   const phase = getPhaseForSession(session); // writing | review
   if (phase === 'review') throw new Error('Writing is disabled during peer review.');
@@ -540,9 +567,12 @@ function apiStartSession(token, session_id, duration_mins){
     const base = 2 + rowIndex;
     const existing = rows[rowIndex];
 
-    // If the session is still live (e.g. instructor reloaded the dashboard mid-class),
-    // keep its current phase. If it was stopped or has expired, this is a fresh run of
-    // a reused session ID: reset to writing and close any leftover peer review.
+    // Keep the current phase if the session is still live (e.g. instructor reloaded the
+    // dashboard mid-class) or has peer review open (instructor coming back after class to
+    // read reviews; use "Back to writing" to leave review). Otherwise this is a fresh run
+    // of a reused session ID: reset to writing.
+    const peerOpenCol = hdr.indexOf('peer_open');
+    const peerOpen = peerOpenCol >= 0 && String(existing[peerOpenCol]).toLowerCase() === 'true';
     const actCol   = hdr.indexOf('is_active');
     const untilCol = hdr.indexOf('active_until');
     const phaseCol = hdr.indexOf('phase');
@@ -557,7 +587,7 @@ function apiStartSession(token, session_id, duration_mins){
     setIfExists(sh, base, hdr, 'archived', 'FALSE');
     setIfExists(sh, base, hdr, 'is_poll_mode', 'FALSE');
 
-    if (stillLive) {
+    if (stillLive || peerOpen) {
       phase = (phaseCol >= 0 && String(existing[phaseCol]).trim().toLowerCase() === 'review') ? 'review' : 'writing';
     } else {
       setIfExists(sh, base, hdr, 'created_at', now);
@@ -676,7 +706,7 @@ function apiGetActiveSessionForInstructor(instructor_id) {
   };
 }
 
-/** Stop session early */
+/** Stop session early: closes writing. Peer review (if open) continues until its deadline. */
 function apiStopSession(token, session_id) {
   const instructor_id = requireInstructor_(token);
   const sh = getSheetByName(SHEET_SESSIONS);
@@ -693,11 +723,78 @@ function apiStopSession(token, session_id) {
   const base = 2 + idx;
   setIfExists(sh, base, hdr, 'is_open', 'FALSE');
   setIfExists(sh, base, hdr, 'is_active', 'FALSE');
-  // Stopping also ends peer review and resets the phase for any future reuse of this ID
-  setIfExists(sh, base, hdr, 'peer_open', 'FALSE');
-  setIfExists(sh, base, hdr, 'phase', 'writing');
-  setIfExists(sh, base, hdr, 'is_review_mode', 'FALSE');
   return { ok:true };
+}
+
+/** Find the Sessions row for (session_id, instructor_id). Returns {sh, hdr, rows, rowIdx, base}. */
+function findOwnedSessionRow_(instructor_id, session_id) {
+  const sh = getSheetByName(SHEET_SESSIONS);
+  const { header: hdr, rows } = readTable(sh);
+  const idCol   = idxRequired(hdr, 'session_id');
+  const instCol = idxRequired(hdr, 'instructor_id');
+  const rowIdx = rows.findIndex(r =>
+    String(r[idCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
+    String(r[instCol]).trim() === String(instructor_id)
+  );
+  if (rowIdx === -1) throw new Error('Session not found for instructor.');
+  return { sh, hdr, rows, rowIdx, base: 2 + rowIdx };
+}
+
+/** Extend (or reopen) writing for a session by `mins` minutes from now or from its current end */
+function apiExtendSession(token, session_id, mins) {
+  const instructor_id = requireInstructor_(token);
+  const m = Math.max(1, parseInt(mins, 10) || 30);
+  const { sh, hdr, rows, rowIdx, base } = findOwnedSessionRow_(instructor_id, session_id);
+  const untilCol = hdr.indexOf('active_until');
+  const actCol   = hdr.indexOf('is_active');
+  const now = new Date();
+  const cur = untilCol >= 0 ? prParseDate(rows[rowIdx][untilCol]) : null;
+  const stillActive = actCol >= 0 && String(rows[rowIdx][actCol]).toLowerCase() === 'true';
+  const from = (stillActive && cur && !isNaN(cur.getTime()) && cur > now) ? cur : now;
+  const until = new Date(from.getTime() + m * 60 * 1000);
+  setIfExists(sh, base, hdr, 'is_open', 'TRUE');
+  setIfExists(sh, base, hdr, 'is_active', 'TRUE');
+  setIfExists(sh, base, hdr, 'active_until', until);
+  return { ok:true, active_until: until.toISOString() };
+}
+
+/** Change the peer review deadline. Pass '' for no deadline. */
+function apiSetPeerDeadline(token, session_id, peer_until_iso) {
+  const instructor_id = requireInstructor_(token);
+  const until = parseDeadline_(peer_until_iso);
+  if (until && until <= new Date()) throw new Error('The review deadline must be in the future.');
+  const { sh, base } = findOwnedSessionRow_(instructor_id, session_id);
+  const col = ensureHeaderColumn_(sh, 'peer_until');
+  sh.getRange(base, col).setValue(until || '');
+  return { ok:true, peer_until: until ? until.toISOString() : '' };
+}
+
+/** Close peer review submissions now. Received reviews stay viewable. */
+function apiCloseReviews(token, session_id) {
+  const instructor_id = requireInstructor_(token);
+  const { sh, base } = findOwnedSessionRow_(instructor_id, session_id);
+  const col = ensureHeaderColumn_(sh, 'peer_until');
+  const now = new Date();
+  sh.getRange(base, col).setValue(now);
+  return { ok:true, peer_until: now.toISOString() };
+}
+
+/** Full state of one session, for the dashboard */
+function apiGetSessionState(token, session_id) {
+  const instructor_id = requireInstructor_(token);
+  const session = requireSessionOwner_(instructor_id, session_id);
+  const activeUntil = prParseDate(session.active_until);
+  const peerUntil = getPeerUntil_(session);
+  return {
+    ok: true,
+    session_id: String(session.session_id),
+    phase: getPhaseForSession(session),
+    writing_open: isSessionActive(session),
+    active_until: (activeUntil && !isNaN(activeUntil.getTime())) ? activeUntil.toISOString() : '',
+    peer_open: prBool(session.peer_open),
+    reviews_open: areReviewsOpen_(session),
+    peer_until: peerUntil ? peerUntil.toISOString() : ''
+  };
 }
 
 /** List responses by instructor + session (for dashboard) */
@@ -853,11 +950,14 @@ function apiGetResponseText(session_id, response_id) {
 /*********************************
  * OPEN peer review (instructor) *
  *********************************/
-function apiStartPeerReview(token, session_id, window_mins, reviews_per_student) {
+function apiStartPeerReview(token, session_id, window_mins, reviews_per_student, peer_until_iso) {
   const instructor_id = requireInstructor_(token);
   if (!session_id) throw new Error('Missing session.');
+  const peerUntil = parseDeadline_(peer_until_iso); // null = no deadline
+  if (peerUntil && peerUntil <= new Date()) throw new Error('The review deadline must be in the future.');
 
   const sh = getSheetByName(SHEET_SESSIONS);
+  ensureHeaderColumn_(sh, 'peer_until');
   const { header: hdr, rows } = readTable(sh);
 
   const idCol   = hdr.indexOf('session_id');
@@ -881,6 +981,7 @@ function apiStartPeerReview(token, session_id, window_mins, reviews_per_student)
   setIfExists(sh, base, hdr, 'peer_opened_at', openedAt);
   setIfExists(sh, base, hdr, 'peer_window_mins', wm);
   setIfExists(sh, base, hdr, 'peer_required_reviews', k);
+  setIfExists(sh, base, hdr, 'peer_until', peerUntil || '');
 
   // Only one peer review open per instructor: close any others left open from earlier sessions
   const openCol = hdr.indexOf('peer_open');
@@ -893,33 +994,49 @@ function apiStartPeerReview(token, session_id, window_mins, reviews_per_student)
     });
   }
 
-  return { ok:true, session_id, phase:'review', peer_open:true, window_mins: wm, reviews_per_student: k, opened_at: openedAt.toISOString() };
+  return {
+    ok:true, session_id, phase:'review', peer_open:true, window_mins: wm, reviews_per_student: k,
+    opened_at: openedAt.toISOString(), peer_until: peerUntil ? peerUntil.toISOString() : ''
+  };
 }
 
 /**
- * If peer review is open for this instructor, return the most recently opened session_id.
- * Peer reviews opened more than PEER_FALLBACK_MAX_HOURS ago are ignored as stale.
+ * What the student page should show for an instructor link (?inst=...):
+ *   1. The instructor's live session (writing open), in its current phase; otherwise
+ *   2. their most recently opened peer review (peer_open = TRUE), open or past its deadline;
+ *   3. otherwise nothing.
+ * Returns { ok, session_id, phase: 'writing'|'review'|'', writing_open, reviews_open, peer_until }.
  */
-function apiGetOpenPeerSessionForInstructor(instructor_id) {
-  if (!instructor_id) return { ok:false, error:'Missing instructor' };
+function apiGetStudentView(instructor_id) {
+  const none = { ok:true, session_id:'', phase:'', writing_open:false, reviews_open:false, peer_until:'' };
+  if (!instructor_id) return none;
+
   const sh = getSheetByName(SHEET_SESSIONS);
   const { header: hdr, rows } = readTable(sh);
-
-  const instCol = hdr.indexOf('instructor_id');
-  const openCol = hdr.indexOf('peer_open');
-  const atCol   = hdr.indexOf('peer_opened_at');
-  const idCol   = hdr.indexOf('session_id');
-  if (instCol === -1 || openCol === -1 || idCol === -1) return { ok:true, open:false, session_id:'' };
-
   const mine = rows
-    .map(r => ({ inst: r[instCol], open: String(r[openCol]||'').toLowerCase()==='true', at: prParseDate(r[atCol]), sid: String(r[idCol]||'') }))
-    .filter(x => String(x.inst) === String(instructor_id) && x.open)
-    .filter(x => x.at && !isNaN(x.at.getTime()) &&
-                 (Date.now() - x.at.getTime()) <= PEER_FALLBACK_MAX_HOURS * 3600 * 1000);
+    .map(r => { const rec = {}; hdr.forEach((h, i) => rec[h] = r[i]); return rec; })
+    .filter(s => String(s.instructor_id).trim() === String(instructor_id).trim() && s.session_id !== '');
 
-  if (!mine.length) return { ok:true, open:false, session_id:'' };
-  mine.sort((a,b) => (b.at?.getTime()||0) - (a.at?.getTime()||0));
-  return { ok:true, open:true, session_id: mine[0].sid, phase:'review' };
+  const view = (s) => {
+    const pu = getPeerUntil_(s);
+    return {
+      ok: true,
+      session_id: String(s.session_id),
+      phase: getPhaseForSession(s),
+      writing_open: isSessionActive(s),
+      reviews_open: areReviewsOpen_(s),
+      peer_until: pu ? pu.toISOString() : ''
+    };
+  };
+  const time = (v) => { const d = prParseDate(v); return (d && !isNaN(d.getTime())) ? d.getTime() : 0; };
+
+  const live = mine.filter(isSessionActive).sort((a, b) => time(b.active_until) - time(a.active_until));
+  if (live.length) return view(live[0]);
+
+  const peer = mine.filter(s => prBool(s.peer_open)).sort((a, b) => time(b.peer_opened_at) - time(a.peer_opened_at));
+  if (peer.length) return Object.assign(view(peer[0]), { phase: 'review' });
+
+  return none;
 }
 
 /** Assign peer targets for a reviewer: ensure self + others (default n_assign=3)
@@ -980,6 +1097,8 @@ function apiAssignPeerTargets(session_id, reviewer_token, n_assign) {
     let assigned = existing.slice();
     assigned = assigned.slice(0, n_assign);
     if (assigned.length >= n_assign) return { ok:true, assigned };
+    // After the review deadline, show existing assignments but don't hand out new ones
+    if (!areReviewsOpen_(getSession(session_id))) return { ok:true, assigned };
 
     // Sample remaining from candidates (exclude self & already assigned)
     const remainingIds =
@@ -1016,15 +1135,14 @@ function apiAssignPeerTargets(session_id, reviewer_token, n_assign) {
 }
 
 /** Submit peer feedback (free form)
- *  UPDATED: allowed when session is active OR when peer_open is TRUE.
+ *  Allowed while peer review is open and before its deadline (see areReviewsOpen_).
  */
 function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback_text){
   const session = getSession(session_id);
   if (!session) throw new Error('Session not found.');
 
-  // Allow if session active, OR peer review open
-  const okToReview = isSessionActive(session) || prBool(session.peer_open);
-  if (!okToReview) throw new Error('Peer review is not currently open.');
+  // Allowed while peer review is open and before its deadline (even after the session ends)
+  if (!areReviewsOpen_(session)) throw new Error('Peer review is closed, so new reviews can no longer be submitted.');
 
   const settings = getSettings();
   const text = String(feedback_text||'').trim();

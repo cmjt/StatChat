@@ -9,27 +9,45 @@ then (optionally) review each other's answers.
 
 ## Session lifecycle
 
+Writing and peer review have separate time limits. Writing ends with the
+session. Peer review can carry on after the session until its own deadline.
+
 1. **Open**: the instructor logs in on the dashboard with a session ID. This
-   creates the session (or reopens an existing one) and makes it active for
-   60 minutes in the **writing** phase.
-   - If the session is still active (e.g. the dashboard was reloaded mid-class),
-     its current phase is kept.
-   - If a stopped or expired session ID is reused, it is reset to **writing**
-     and any leftover peer review is closed.
+   creates the session (or reopens an existing one) with writing open for
+   60 minutes. Students can only submit responses while writing is open.
+   - If the session is still active, or has peer review open (e.g. the
+     instructor is back the next day to read reviews), its current phase is kept.
+   - Otherwise a reused session ID is reset to **writing**.
+   - **+30 min** extends writing, or reopens it if it was stopped or has expired.
 2. **Peer review**: *Peer review* switches the session to the **review** phase
    (`peer_open = TRUE`). Writing is disabled and each student who submitted is
    assigned *Reviews per student* peer responses. Opening peer review closes
    any other peer review the same instructor still has open.
-3. **Back to writing**: closes peer review (`peer_open = FALSE`) and reopens
-   writing.
-4. **Stop session**: deactivates the session and closes peer review.
+   - **Reviews close** (optional) sets a deadline (`peer_until`). Students can
+     submit reviews until then, even after the session has ended. Leave it blank
+     for no deadline. Changing it while peer review is open saves immediately.
+   - **Close reviews** stops accepting reviews now.
+   - After the deadline, the review is read-only. Students who completed all
+     their assigned reviews can still read the feedback they received, and the
+     dashboard still shows every review on each card.
+3. **Back to writing**: ends peer review entirely (`peer_open = FALSE`) and
+   reopens writing. Students can no longer see that session's reviews.
+4. **Stop session**: closes writing now. Peer review, if open, continues until
+   its deadline.
 
-When an instructor has no active session, students are shown that instructor's
-most recently opened peer review, as long as it was opened within the last
-`PEER_FALLBACK_MAX_HOURS` hours (default 12, set at the top of `Code.gs`).
+What students see at the instructor's link:
+
+1. The instructor's session with writing open, in its current phase; otherwise
+2. the instructor's most recently opened peer review, open or read-only;
+   otherwise
+3. "No active session".
 
 The student page checks the session state once, when it loads. Students need to
 reload the page to see a phase change.
+
+The dashboard's **Show last N mins** filter applies to response cards, not to
+reviews. When looking at a session after class, set it to `0` to show every
+card.
 
 ## Instructor authentication
 
@@ -75,8 +93,9 @@ Recommended columns (features that use them are skipped if they're missing):
 - created_at
 - archived
 - peer_open
-- peer_opened_at — needed for the student peer-review fallback
+- peer_opened_at — needed for students to see a peer review after the session ends
 - peer_required_reviews
+- peer_until — review deadline (added automatically when peer review is opened)
 - peer_window_mins
 - history_window_mins
 
