@@ -438,7 +438,7 @@
       const mins = Math.max(1, Number(minsInput ? minsInput.value : HISTORY_WINDOW_MINS || 5));
       // Reviews per student
       const kInput = document.getElementById('peerK');
-      const k = Math.max(1, Number(kInput ? kInput.value : 2));
+      const k = Math.max(1, Number(kInput ? kInput.value : 1) || 1);
       const statusEl = document.getElementById('peerStatus');
       const peerUntilIso = getPeerUntilIso();
       if (peerUntilIso && new Date(peerUntilIso) <= new Date()) {
@@ -1097,11 +1097,17 @@
     }
 
     // --- Save edit & position ---
+    // Save an instructor edit when the card loses focus, but only if the text changed
     function saveEdit(id, text){
+      const r = RESPONSES.find(x => String(x.response_id) === String(id));
+      const next = String(text || '').trim();
+      const current = r ? String(r.response_text_edited || r.response_text_original || '').trim() : null;
+      if (current !== null && next === current) return; // unchanged: don't write
+      if (r) r.response_text_edited = next;              // keep the local model in sync
       google.script.run
-        .withSuccessHandler(()=>{ /* auto-refresh will pick up */ })
+        .withSuccessHandler(()=>{ /* picked up on next Refresh */ })
         .withFailureHandler(err=>{ alert('Save failed: ' + (err && err.message ? err.message : err)); })
-        .apiUpdateResponse(AUTH_TOKEN, id, { response_text_edited: text });
+        .apiUpdateResponse(AUTH_TOKEN, id, { response_text_edited: next });
     }
     function savePosition(id, x, y){
       // Persist position; keep using the write-in-flight pause set at drag end

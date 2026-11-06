@@ -35,6 +35,19 @@ session. Peer review can carry on after the session until its own deadline.
 4. **Stop session**: closes writing now. Peer review, if open, continues until
    its deadline.
 
+Peer review rules, all enforced on the server:
+
+- Each student is assigned *Reviews per student* (default 1) responses from
+  other students. They are never assigned their own, and never one the
+  instructor has hidden.
+- A student can only review responses assigned to them, once each. Reviews
+  need at least 10 words.
+- If the instructor hides a response after it was assigned, it stops counting
+  towards the student's required reviews. While reviews are open, a
+  replacement is assigned.
+- Received feedback is only released once a student has reviewed all their
+  assigned responses. Hidden reviews and hidden responses are never shown.
+
 What students see at the instructor's link:
 
 1. The instructor's session with writing open, in its current phase; otherwise

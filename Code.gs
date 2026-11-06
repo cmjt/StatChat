@@ -239,23 +239,75 @@ function getPhaseForSession(session) {
 // ===== Peer review small helpers (NEW) =====
 function prParseDate(v) { try { return v instanceof Date ? v : (v ? new Date(v) : null); } catch(e){ return null; } }
 function prBool(v) { return String(v || '').toLowerCase() === 'true'; }
-/** Read peer review config for a session from Sessions (if present) */
-function getPeerConfigForSession(session_id) {
-  const sh = getSheetByName(SHEET_SESSIONS);
-  const { header: hdr, rows } = readTable(sh);
-  const idCol = hdr.indexOf('session_id');
-  if (idCol === -1) throw new Error('Missing column: session_id in Sessions.');
-  const idx = rows.findIndex(r => String(r[idCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase());
-  if (idx === -1) return null;
-  const rec = {}; hdr.forEach((h,i)=> rec[h] = rows[idx][i]);
+// ===== PEER REVIEW PROGRESS =====
+// These helpers are the single source of truth for "which reviews does this student owe,
+// and have they done them". They're used to hand out assignments, to validate review
+// submissions, and to decide (server-side) whether received feedback is unlocked.
 
-  if (!prBool(rec.peer_open)) return null;
+const DEFAULT_REVIEWS_PER_STUDENT = 1;
 
-  const openedAt = prParseDate(rec.peer_opened_at) || new Date();
-  const windowMins = Math.max(1, parseInt(rec.peer_window_mins,10) || 5);
-  const required = Math.max(1, parseInt(rec.peer_required_reviews,10) || 2);
+/** Case/whitespace-insensitive ID comparison (session IDs are typed by instructors) */
+function sameId_(a, b) {
+  return String(a == null ? '' : a).trim().toLowerCase() === String(b == null ? '' : b).trim().toLowerCase();
+}
 
-  return { opened_at: openedAt, window_mins: windowMins, required_reviews: required };
+/** Reviews each student must complete in this session */
+function requiredReviews_(session) {
+  return Math.max(1, parseInt(session && session.peer_required_reviews, 10) || DEFAULT_REVIEWS_PER_STUDENT);
+}
+
+/** Visible (not hidden) responses in a session, in sheet order: [{response_id, author, text}] */
+function visibleResponses_(session_id) {
+  const { header: hdr, rows } = readTable(getResponsesSheet());
+  const idx = (name)=>{ const i = hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
+  const sCol = idx('session_id'), hidCol = idx('is_hidden'), uidCol = idx('reviewer_token'),
+        idCol = idx('response_id'), txtECol = idx('response_text_edited'), txtOCol = idx('response_text_original');
+  return rows
+    .filter(r => sameId_(r[sCol], session_id) && String(r[hidCol] || 'FALSE').toLowerCase() !== 'true')
+    .map(r => ({
+      response_id: String(r[idCol] || ''),
+      author: String(r[uidCol] || '').trim(),
+      text: String(r[txtECol] || '') || String(r[txtOCol] || '')
+    }));
+}
+
+/** All response_ids assigned to this reviewer in this session, in assignment order */
+function assignedIds_(session_id, reviewer_token) {
+  const { header: aHdr, rows: aRows } = readTable(getPeerAssignmentsSheet());
+  const aIdx = (name)=>{ const i=aHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerAssignments.`); return i; };
+  const aSCol = aIdx('session_id'), aUCol = aIdx('reviewer_token'), aRidCol = aIdx('response_id');
+  const token = String(reviewer_token || '').trim();
+  return aRows
+    .filter(r => sameId_(r[aSCol], session_id) && String(r[aUCol]).trim() === token)
+    .map(r => String(r[aRidCol]));
+}
+
+/** response_ids this reviewer has already reviewed in this session (ignoring hidden reviews) */
+function reviewedIds_(session_id, reviewer_token) {
+  const { header: hdr, rows } = readTable(getPeerFeedbackSheet());
+  const sCol = hdr.indexOf('session_id'), rCol = hdr.indexOf('response_id'),
+        uCol = hdr.indexOf('reviewer_token'), hCol = hdr.indexOf('is_hidden');
+  if ([sCol, rCol, uCol].some(i => i === -1)) throw new Error('Missing columns in PeerFeedback.');
+  const token = String(reviewer_token || '').trim();
+  return new Set(rows
+    .filter(r => sameId_(r[sCol], session_id) && String(r[uCol]).trim() === token &&
+                 (hCol === -1 || String(r[hCol] || 'FALSE').toLowerCase() !== 'true'))
+    .map(r => String(r[rCol])));
+}
+
+/**
+ * A reviewer's progress: the responses they currently owe a review for (assigned, still
+ * visible, capped at the required number) and whether they have reviewed all of them.
+ * Responses the instructor hid after assignment no longer count.
+ */
+function reviewProgress_(session_id, reviewer_token, visible) {
+  const session = getSession(session_id);
+  const n = requiredReviews_(session);
+  const visibleIds = new Set((visible || visibleResponses_(session_id)).map(v => v.response_id));
+  const assigned = assignedIds_(session_id, reviewer_token).filter(id => visibleIds.has(id)).slice(0, n);
+  const completed = reviewedIds_(session_id, reviewer_token);
+  const allDone = assigned.length > 0 && assigned.every(id => completed.has(id));
+  return { session, required: n, assigned, completed, allDone };
 }
 
 // ===== RESPONSES I/O =====
@@ -973,7 +1025,7 @@ function apiStartPeerReview(token, session_id, window_mins, reviews_per_student,
   const base = 2 + rowIdx;
   const openedAt = new Date();
   const wm = Math.max(1, parseInt(window_mins,10) || 5);
-  const k  = Math.max(1, parseInt(reviews_per_student,10) || 2);
+  const k  = Math.max(1, parseInt(reviews_per_student,10) || DEFAULT_REVIEWS_PER_STUDENT);
 
   // Only set columns if they exist
   setIfExists(sh, base, hdr, 'phase', 'review');
@@ -1039,98 +1091,55 @@ function apiGetStudentView(instructor_id) {
   return none;
 }
 
-/** Assign peer targets for a reviewer: ensure self + others (default n_assign=3)
- *  UPDATED: respects peer window when peer_open is set; excludes hidden; avoids duplicates.
+/** Assign peer responses for a reviewer to review (never their own; hidden responses excluded).
+ *  The number is the session's peer_required_reviews; it can't be chosen by the client.
+ *  Existing assignments are kept; if one was hidden by the instructor, a replacement is
+ *  assigned while reviews are still open. Returns { ok, assigned: [response_id] }.
  */
-function apiAssignPeerTargets(session_id, reviewer_token, n_assign) {
-  n_assign = Number(n_assign || 0);
-  if (!n_assign) {
-    const cfg =
-      getPeerConfigForSession(session_id);
-    n_assign =
-      (cfg && cfg.required_reviews)
-        ? Number(cfg.required_reviews)
-        : 1;
-  }
-  // Responses sheet
-  const shR = getResponsesSheet();
-  const { header: hdr, rows } = readTable(shR);
-  const idx = (name)=>{ const i = hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
-  const sCol = idx('session_id'), hidCol = idx('is_hidden'), uidCol = idx('reviewer_token'), idCol = idx('response_id'), tsCol = idx('timestamp');
+function apiAssignPeerTargets(session_id, reviewer_token) {
+  const token = String(reviewer_token || '').trim();
+  if (!session_id || !token) return { ok:true, assigned: [] };
 
-  // Build candidate rows for this session (visible only)
-  const all = rows
-    .map(r => ({
-      response_id: String(r[idCol]||''),
-      session_id:  String(r[sCol]||''),
-      is_hidden:   String(r[hidCol]||'FALSE'),
-      author:      String(r[uidCol]||''),
-      ts:          r[tsCol] instanceof Date ? r[tsCol] : new Date(r[tsCol])
-    }))
-    .filter(r => String(r.session_id).trim().toLowerCase() === String(session_id).trim().toLowerCase())
-    .filter(r => String(r.is_hidden).toLowerCase() !== 'true');
+  const visible = visibleResponses_(session_id);
+  // Only students who submitted a (visible) response take part
+  if (!visible.some(v => v.author === token)) return { ok:true, assigned: [] };
 
-  // If peer review is configured, restrict to window [opened_at - window_mins, opened_at]
-  const candidates = all;
-
-  // Require at least one own submission for eligibility
-  const own = candidates.filter(r => r.author === String(reviewer_token||'').trim());
-  if (!own.length) return { ok:true, assigned: [] };
-
-  // pick latest own submission as mandatory self review
-  own.sort((a,b)=> b.ts - a.ts);
-
-  // PeerAssignments sheet & existing assignments.
   // Read-check-append runs under the lock so two tabs/refreshes from the same student
   // can't both append a fresh set, and concurrent appends can't overwrite each other's rows.
   const shA = getPeerAssignmentsSheet();
   return withScriptLock_(() => {
-    const { header: aHdr, rows: aRows } = readTable(shA);
-    const aIdx = (name)=>{ const i=aHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerAssignments.`); return i; };
-    const aSCol=aIdx('session_id'), aUCol=aIdx('reviewer_token'), aRidCol=aIdx('response_id');
-
-    const existing = aRows
-      .filter(r => String(r[aSCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
-                   String(r[aUCol]).trim() === String(reviewer_token))
-      .map(r => String(r[aRidCol]));
-
-    let assigned = existing.slice();
-    assigned = assigned.slice(0, n_assign);
-    if (assigned.length >= n_assign) return { ok:true, assigned };
+    const progress = reviewProgress_(session_id, token, visible);
+    const n = progress.required;
+    const assigned = progress.assigned;
+    if (assigned.length >= n) return { ok:true, assigned };
     // After the review deadline, show existing assignments but don't hand out new ones
-    if (!areReviewsOpen_(getSession(session_id))) return { ok:true, assigned };
+    if (!areReviewsOpen_(progress.session)) return { ok:true, assigned };
 
-    // Sample remaining from candidates (exclude self & already assigned)
-    const remainingIds =
-      candidates
-        .filter(r =>
-            r.author !== String(reviewer_token)
-        )
-        .map(r => r.response_id)
-        .filter(id =>
-            !assigned.includes(id)
-        );
-    for (let i=remainingIds.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [remainingIds[i],remainingIds[j]]=[remainingIds[j],remainingIds[i]]; }
-    const take = remainingIds.slice(0, Math.max(0, n_assign - assigned.length));
-    const toAssign = assigned.concat(take).slice(0, n_assign);
+    // Sample from other students' visible responses not already assigned to this reviewer
+    // (including assignments that were later hidden, so they never come back)
+    const everAssigned = new Set(assignedIds_(session_id, token));
+    const pool = visible
+      .filter(v => v.author !== token && !everAssigned.has(v.response_id))
+      .map(v => v.response_id);
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    const take = pool.slice(0, n - assigned.length);
 
     // Persist newly assigned, honouring the sheet's header order
-    const now = new Date();
-    const rowsToAppend = take.map(id => aHdr.map(h => {
-      switch (h) {
-        case 'session_id':     return session_id;
-        case 'reviewer_token': return String(reviewer_token);
-        case 'response_id':    return id;
-        case 'assigned_at':    return now;
-        default:               return '';
-      }
-    }));
-
-    if (rowsToAppend.length){
-      const startRow = shA.getLastRow() + 1;
-      shA.getRange(startRow, 1, rowsToAppend.length, aHdr.length).setValues(rowsToAppend);
+    if (take.length) {
+      const { header: aHdr } = readTable(shA);
+      const now = new Date();
+      const rowsToAppend = take.map(id => aHdr.map(h => {
+        switch (h) {
+          case 'session_id':     return session_id;
+          case 'reviewer_token': return token;
+          case 'response_id':    return id;
+          case 'assigned_at':    return now;
+          default:               return '';
+        }
+      }));
+      shA.getRange(shA.getLastRow() + 1, 1, rowsToAppend.length, aHdr.length).setValues(rowsToAppend);
     }
-    return { ok:true, assigned: toAssign };
+    return { ok:true, assigned: assigned.concat(take) };
   });
 }
 
@@ -1165,8 +1174,21 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback
   const { header: hdr } = readTable(sh);
   const idx = (name)=>{ const i=hdr.indexOf(name); if (i===-1) throw new Error(`Missing column ${name} in PeerFeedback.`); return i; };
 
-  // feedback_id autoinc — allocate and append under the lock so IDs stay unique
+  const token = String(reviewer_token || '').trim();
+  const rid = String(response_id || '').trim();
+  if (!token || !rid) throw new Error('Missing reviewer or response.');
+
+  // Validate and append under the lock, so a double-click can't store the same review twice
+  // and feedback IDs stay unique
   return withScriptLock_(() => {
+    const progress = reviewProgress_(session_id, token);
+    if (!progress.assigned.includes(rid)) {
+      throw new Error('You can only review responses assigned to you.');
+    }
+    if (progress.completed.has(rid)) {
+      throw new Error('You have already reviewed this response.');
+    }
+
     const last = sh.getLastRow();
     let nextId = 1;
     if (last >= 2){
@@ -1178,8 +1200,8 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback
       switch(h){
         case 'feedback_id':  return nextId;
         case 'session_id':   return session_id;
-        case 'response_id':  return response_id;
-        case 'reviewer_token':  return String(reviewer_token||'');
+        case 'response_id':  return rid;
+        case 'reviewer_token':  return token;
         case 'feedback_text':return outText;
         case 'timestamp':    return new Date();
         case 'is_hidden':    return 'FALSE';
@@ -1315,7 +1337,7 @@ function apiListFeedbackSummary(token, session_id) {
 
     // Filter: match session_id, not hidden
     const rows = all.filter(r =>
-      String(r.session_id || '').trim() === String(session_id).trim() &&
+      sameId_(r.session_id, session_id) &&
       String(r.is_hidden || '').toLowerCase() !== 'true'
     );
 
@@ -1404,7 +1426,7 @@ function apiListFeedbackSummary(token, session_id) {
       for (let i = 0; i < vals.length; i++) {
         const row = vals[i];
 
-        const sessionOk  = String(row[cSessionId - 1]).trim()  === String(session_id).trim();
+        const sessionOk  = sameId_(row[cSessionId - 1], session_id);
         const responseOk = String(row[cResponseId - 1]).trim() === String(response_id).trim();
         if (!sessionOk || !responseOk) continue;
 
@@ -1514,97 +1536,37 @@ function apiDebugSessionAndCounts_(instructor_id, session_id){
     }
   };
 }
+/**
+ * Feedback received on this student's own responses. Locked (empty) until they have
+ * completed all their assigned reviews; this is enforced here, not just in the page.
+ * Hidden responses and hidden reviews are excluded.
+ */
 function apiGetMyFeedback(session_id, reviewer_token) {
-  
-  const responsesSh = getResponsesSheet();
-  const feedbackSh = getPeerFeedbackSheet();
+  const token = String(reviewer_token || '').trim();
+  const locked = { ok:true, locked:true, feedback: [] };
+  if (!session_id || !token) return locked;
 
-  const responses = readTable(responsesSh);
-  const feedback = readTable(feedbackSh);
+  const visible = visibleResponses_(session_id);
+  if (!reviewProgress_(session_id, token, visible).allDone) return locked;
 
-  const rHdr = responses.header;
-  const fHdr = feedback.header;
+  // This student's own visible responses
+  const mine = new Map(visible.filter(v => v.author === token).map(v => [v.response_id, v.text]));
 
-  const responseIds = new Set(
-    responses.rows
-      .filter(r =>
-        String(
-          r[rHdr.indexOf('session_id')]
-        ).trim() === String(session_id).trim()
-      )
-      .filter(r =>
-        String(
-          r[rHdr.indexOf('reviewer_token')]
-        ).trim() === String(reviewer_token).trim()
-      )
-      .map(r =>
-        String(
-          r[rHdr.indexOf('response_id')]
-        )
-      )
-  );
-  const responseLookup = {};
-    responses.rows.forEach(r => {
-      const rid = String(
-        r[rHdr.indexOf('response_id')]
-      );
-      if (responseIds.has(rid)) {
-        responseLookup[rid] =
-          r[rHdr.indexOf('response_text_edited')] ||
-          r[rHdr.indexOf('response_text')] ||
-          '';
-      }
-  });
-  const results = feedback.rows
-  .filter(r =>
-    String(
-      r[fHdr.indexOf('session_id')]
-    ).trim() === String(session_id).trim()
-  )
-  .filter(r =>
-    responseIds.has(
-      String(
-        r[fHdr.indexOf('response_id')]
-      )
-    )
-  )
-  .map(r => {
-    const rid = String(
-      r[fHdr.indexOf('response_id')]
-    );
-    const responseRow = responses.rows.find(resp =>
-      String(
-        resp[rHdr.indexOf('response_id')]
-      ) === rid
-    );
-    return {
-      response_id: rid,
-      response_text: responseRow
-        ? (
-            String(
-              responseRow[
-                rHdr.indexOf('response_text_edited')
-              ] || ''
-            ) ||
-            String(
-              responseRow[
-                rHdr.indexOf('response_text_original')
-              ] || ''
-            )
-          )
-        : '',
-      feedback: String(
-        r[fHdr.indexOf('feedback_text')]
-      ),
-      timestamp: String(
-        r[fHdr.indexOf('timestamp')]
-      )
-    };
-  });
-  return {
-    ok: true,
-    feedback: results
-  };
+  const { header: fHdr, rows: fRows } = readTable(getPeerFeedbackSheet());
+  const fIdx = (name)=>{ const i = fHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerFeedback.`); return i; };
+  const sCol = fIdx('session_id'), rCol = fIdx('response_id'), tCol = fIdx('feedback_text'),
+        tsCol = fIdx('timestamp'), hCol = fHdr.indexOf('is_hidden');
+
+  const feedback = fRows
+    .filter(r => sameId_(r[sCol], session_id) && mine.has(String(r[rCol])) &&
+                 (hCol === -1 || String(r[hCol] || 'FALSE').toLowerCase() !== 'true'))
+    .map(r => ({
+      response_id: String(r[rCol]),
+      response_text: mine.get(String(r[rCol])),
+      feedback: String(r[tCol] || ''),
+      timestamp: String(r[tsCol] || '')
+    }));
+  return { ok:true, locked:false, feedback };
 }
 
 function doPost(e) {
