@@ -13,6 +13,8 @@
     :root {
       --sta-blue: #00539b;
       --sta-blue-hover: #007bc2;
+      --danger: #b42318;
+      --danger-hover: #8f1d14;
       --border: #d0d5dd;
       --text-light: #ffffff;
     }
@@ -213,7 +215,12 @@
         <button type="button" class="btn btn-view" onclick="openPeerReview()" aria-label="Peer review" title="Peer review">👥<span class="btn-label">Peer review</span></button>
         <label for="peerK" style="margin-right:6px;">Reviews per student</label>
         <input id="peerK" type="number" min="1" value="1" style="width:64px;">
+        <button type="button" class="btn btn-view" onclick="backToWriting()" aria-label="Back to writing" title="Close peer review and reopen writing">✏️<span class="btn-label">Back to writing</span></button>
         <span id="peerStatus" class="debugChip"></span>
+      </span>
+
+      <span style="margin-left:12px;">
+        <button type="button" class="btn btn-stop" onclick="stopSession()" aria-label="Stop session" title="Stop session and close peer review">⏹<span class="btn-label">Stop session</span></button>
       </span>
 
       <!-- <span id="debugChip" class="debugChip"></span> -->
@@ -444,6 +451,50 @@
           if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
         })
         .apiStartPeerReview(INSTRUCTOR_ID, currentSessionId, mins, k);
+    }
+
+    // Close peer review and return the session to the writing phase
+    function backToWriting(){
+      if (!INSTRUCTOR_ID || !currentSessionId) return;
+      if (!confirm('Close peer review and reopen writing? Students need to reload their page to see the change.')) return;
+      const statusEl = document.getElementById('peerStatus');
+      if (statusEl) statusEl.textContent = 'Closing...';
+      google.script.run
+        .withSuccessHandler(() => {
+          if (statusEl) statusEl.textContent = 'Peer review closed';
+          CURRENT_PHASE = 'writing';
+          render();
+          bumpDebugChip();
+        })
+        .withFailureHandler(err => {
+          if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
+        })
+        .apiSetPhase(INSTRUCTOR_ID, currentSessionId, 'writing');
+    }
+
+    // Stop the session entirely (closes writing and peer review) and return to login
+    function stopSession(){
+      if (!INSTRUCTOR_ID || !currentSessionId) return;
+      if (!confirm(`Stop session "${currentSessionId}"? Students will no longer be able to submit or review.`)) return;
+      google.script.run
+        .withSuccessHandler(() => {
+          CURRENT_PHASE = 'writing';
+          RESPONSES = [];
+          FEEDBACK_BY_RESPONSE = {};
+          currentSessionId = '';
+          document.getElementById('peerStatus').textContent = '';
+          document.getElementById('listView').innerHTML = '';
+          document.getElementById('dashView').style.display = 'none';
+          document.getElementById('loginView').style.display = 'block';
+          const msg = document.getElementById('startMsg');
+          msg.style.color = '#0a7';
+          msg.textContent = 'Session stopped.';
+          document.getElementById('startBtn').disabled = false;
+        })
+        .withFailureHandler(err => {
+          alert('Stop failed: ' + (err && err.message ? err.message : err));
+        })
+        .apiStopSession(INSTRUCTOR_ID, currentSessionId);
     }
 
     // --- Load responses (auto refresh only) ---
@@ -800,9 +851,8 @@
               const rLocal = RESPONSES.find(x => String(x.response_id) === String(r.response_id));
               if (rLocal) { rLocal.pos_x = nx; rLocal.pos_y = ny; }
 
-              // Pause auto-refresh during write
+              // Record local write timestamp so a refresh doesn't revert the move
               WRITE_IN_FLIGHT = true;
-              stopAutoRefresh();
               POS_WRITE_TS[String(r.response_id)] = Date.now();
 
               savePosition(r.response_id, nx, ny);
@@ -870,9 +920,8 @@
         if (summary) summary.textContent = 'Tags: ' + (r.tags || '');
       }
 
-      // Pause auto-refresh during write, record local write timestamp
+      // Record local write timestamp so a refresh doesn't revert the tag
       WRITE_IN_FLIGHT = true;
-      stopAutoRefresh();
       TAG_WRITE_TS[String(responseId)] = Date.now();
 
       // Persist to server

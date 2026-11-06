@@ -6,6 +6,27 @@ const SHEET_SETTINGS    = 'Settings';
 const SHEET_PROFANITY   = 'ProfanityList'; 
 const SHEET_PEER_FEEDBACK    = 'PeerFeedback';
 const SHEET_PEER_ASSIGNMENTS = 'PeerAssignments';
+// Students whose instructor has no active session fall back to an open peer review,
+// but only if it was opened within this many hours (stops stale reviews lingering forever).
+const PEER_FALLBACK_MAX_HOURS = 12;
+
+// ===== LOCKING =====
+/** Run fn while holding the script lock so concurrent writers can't collide
+ *  (e.g. two students getting the same response_id). */
+function withScriptLock_(fn) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    throw new Error('The server is busy. Please try again in a moment.');
+  }
+  try {
+    return fn();
+  } finally {
+    SpreadsheetApp.flush();
+    lock.releaseLock();
+  }
+}
 
 // ===== PING =====
 function pingServer() { return { ok: true, msg: 'pong' }; }
@@ -214,17 +235,20 @@ function getPeerConfigForSession(session_id) {
 function writeResponse(payload) {
   const sh = getResponsesSheet();
   const { header } = getHeaderMap(sh);
-  const id = nextResponseId(sh);
-  const now = new Date();
-  const row = header.map(h => {
-    switch (h) {
-      case 'response_id': return id;
-      case 'timestamp':   return now;
-      default:            return payload[h] !== undefined ? payload[h] : '';
-    }
+  // ID allocation + append must be atomic, otherwise simultaneous submissions share an ID
+  return withScriptLock_(() => {
+    const id = nextResponseId(sh);
+    const now = new Date();
+    const row = header.map(h => {
+      switch (h) {
+        case 'response_id': return id;
+        case 'timestamp':   return now;
+        default:            return payload[h] !== undefined ? payload[h] : '';
+      }
+    });
+    sh.appendRow(row);
+    return id;
   });
-  sh.appendRow(row);
-  return id;
 }
 function updateResponseModeration(response_id, updates) {
   const sh = getResponsesSheet();
@@ -478,18 +502,37 @@ function apiStartSession(instructor_id, session_id, duration_mins){
   const now = new Date();
   const until = new Date(now.getTime() + Number(duration_mins) * 60 * 1000);
   const initialPhase = 'writing';
+  let phase = initialPhase;
 
   if (rowIndex >= 0) {
     const base = 2 + rowIndex;
+    const existing = rows[rowIndex];
+
+    // If the session is still live (e.g. instructor reloaded the dashboard mid-class),
+    // keep its current phase. If it was stopped or has expired, this is a fresh run of
+    // a reused session ID: reset to writing and close any leftover peer review.
+    const actCol   = hdr.indexOf('is_active');
+    const untilCol = hdr.indexOf('active_until');
+    const phaseCol = hdr.indexOf('phase');
+    const prevUntil = untilCol >= 0 ? prParseDate(existing[untilCol]) : null;
+    const stillLive = actCol >= 0 &&
+      String(existing[actCol]).toLowerCase() === 'true' &&
+      prevUntil && !isNaN(prevUntil.getTime()) && now < prevUntil;
+
     setIfExists(sh, base, hdr, 'is_open', 'TRUE');
     setIfExists(sh, base, hdr, 'is_active', 'TRUE');
     setIfExists(sh, base, hdr, 'active_until', until);
-    setIfExists(sh, base, hdr, 'created_at', now);
     setIfExists(sh, base, hdr, 'archived', 'FALSE');
-    //setIfExists(sh, base, hdr, 'phase', initialPhase);
-    // Optional legacy flags—only set if present
-    setIfExists(sh, base, hdr, 'is_review_mode', 'FALSE');
     setIfExists(sh, base, hdr, 'is_poll_mode', 'FALSE');
+
+    if (stillLive) {
+      phase = (phaseCol >= 0 && String(existing[phaseCol]).trim().toLowerCase() === 'review') ? 'review' : 'writing';
+    } else {
+      setIfExists(sh, base, hdr, 'created_at', now);
+      setIfExists(sh, base, hdr, 'phase', initialPhase);
+      setIfExists(sh, base, hdr, 'peer_open', 'FALSE');
+      setIfExists(sh, base, hdr, 'is_review_mode', 'FALSE');
+    }
     // Optional extras: history_window_mins, poll_window_mins – left unchanged
   } else {
     // Build a row honoring available headers
@@ -503,6 +546,7 @@ function apiStartSession(instructor_id, session_id, duration_mins){
         case 'created_at':    return now;
         case 'archived':      return 'FALSE';
         case 'phase':         return initialPhase;
+        case 'peer_open':     return 'FALSE';
         case 'is_review_mode':return 'FALSE';
         case 'is_poll_mode':  return 'FALSE';
         default:              return '';
@@ -510,7 +554,7 @@ function apiStartSession(instructor_id, session_id, duration_mins){
     });
     sh.appendRow(row);
   }
-  return { ok:true, session_id, active_until: until.toISOString(), phase: initialPhase };
+  return { ok:true, session_id, active_until: until.toISOString(), phase };
 }
 
 /** Set phase: writing | review (poll removed as a phase). 
@@ -538,6 +582,8 @@ function apiSetPhase(instructor_id, session_id, phase, history_window_mins) {
   // Align legacy flags only if present
   setIfExists(sh, base, hdr, 'is_poll_mode', 'FALSE');
   setIfExists(sh, base, hdr, 'is_review_mode', phase === 'review' ? 'TRUE' : 'FALSE');
+  // Returning to writing closes peer review, so students no longer fall back into it
+  if (phase === 'writing') setIfExists(sh, base, hdr, 'peer_open', 'FALSE');
 
   // Persist minutes if provided and column exists (lowercase: history_window_mins)
   if (history_window_mins != null) {
@@ -613,6 +659,10 @@ function apiStopSession(instructor_id, session_id) {
   const base = 2 + idx;
   setIfExists(sh, base, hdr, 'is_open', 'FALSE');
   setIfExists(sh, base, hdr, 'is_active', 'FALSE');
+  // Stopping also ends peer review and resets the phase for any future reuse of this ID
+  setIfExists(sh, base, hdr, 'peer_open', 'FALSE');
+  setIfExists(sh, base, hdr, 'phase', 'writing');
+  setIfExists(sh, base, hdr, 'is_review_mode', 'FALSE');
   return { ok:true };
 }
 
@@ -795,11 +845,23 @@ function apiStartPeerReview(instructor_id, session_id, window_mins, reviews_per_
   setIfExists(sh, base, hdr, 'peer_window_mins', wm);
   setIfExists(sh, base, hdr, 'peer_required_reviews', k);
 
+  // Only one peer review open per instructor: close any others left open from earlier sessions
+  const openCol = hdr.indexOf('peer_open');
+  if (openCol >= 0) {
+    rows.forEach((r, i) => {
+      if (i === rowIdx) return;
+      if (String(r[instCol]).trim() !== String(instructor_id)) return;
+      if (String(r[openCol]).toLowerCase() !== 'true') return;
+      sh.getRange(2 + i, openCol + 1).setValue('FALSE');
+    });
+  }
+
   return { ok:true, session_id, phase:'review', peer_open:true, window_mins: wm, reviews_per_student: k, opened_at: openedAt.toISOString() };
 }
 
 /**
  * If peer review is open for this instructor, return the most recently opened session_id.
+ * Peer reviews opened more than PEER_FALLBACK_MAX_HOURS ago are ignored as stale.
  */
 function apiGetOpenPeerSessionForInstructor(instructor_id) {
   if (!instructor_id) return { ok:false, error:'Missing instructor' };
@@ -814,7 +876,9 @@ function apiGetOpenPeerSessionForInstructor(instructor_id) {
 
   const mine = rows
     .map(r => ({ inst: r[instCol], open: String(r[openCol]||'').toLowerCase()==='true', at: prParseDate(r[atCol]), sid: String(r[idCol]||'') }))
-    .filter(x => String(x.inst) === String(instructor_id) && x.open);
+    .filter(x => String(x.inst) === String(instructor_id) && x.open)
+    .filter(x => x.at && !isNaN(x.at.getTime()) &&
+                 (Date.now() - x.at.getTime()) <= PEER_FALLBACK_MAX_HOURS * 3600 * 1000);
 
   if (!mine.length) return { ok:true, open:false, session_id:'' };
   mine.sort((a,b) => (b.at?.getTime()||0) - (a.at?.getTime()||0));
@@ -862,45 +926,56 @@ function apiAssignPeerTargets(session_id, reviewer_token, n_assign) {
   // pick latest own submission as mandatory self review
   own.sort((a,b)=> b.ts - a.ts);
 
-  // PeerAssignments sheet & existing assignments
+  // PeerAssignments sheet & existing assignments.
+  // Read-check-append runs under the lock so two tabs/refreshes from the same student
+  // can't both append a fresh set, and concurrent appends can't overwrite each other's rows.
   const shA = getPeerAssignmentsSheet();
-  const { header: aHdr, rows: aRows } = readTable(shA);
-  const aIdx = (name)=>{ const i=aHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerAssignments.`); return i; };
-  const aSCol=aIdx('session_id'), aUCol=aIdx('reviewer_token'), aRidCol=aIdx('response_id');
+  return withScriptLock_(() => {
+    const { header: aHdr, rows: aRows } = readTable(shA);
+    const aIdx = (name)=>{ const i=aHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerAssignments.`); return i; };
+    const aSCol=aIdx('session_id'), aUCol=aIdx('reviewer_token'), aRidCol=aIdx('response_id');
 
-  const existing = aRows
-    .filter(r => String(r[aSCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
-                 String(r[aUCol]).trim() === String(reviewer_token))
-    .map(r => String(r[aRidCol]));
+    const existing = aRows
+      .filter(r => String(r[aSCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
+                   String(r[aUCol]).trim() === String(reviewer_token))
+      .map(r => String(r[aRidCol]));
 
-  let assigned = existing.slice();
-  assigned = assigned.slice(0, n_assign);
-  if (assigned.length >= n_assign) return { ok:true, assigned };
+    let assigned = existing.slice();
+    assigned = assigned.slice(0, n_assign);
+    if (assigned.length >= n_assign) return { ok:true, assigned };
 
-  // Sample remaining from candidates (exclude self & already assigned)
-  const remainingIds =
-    candidates
-      .filter(r =>
-          r.author !== String(reviewer_token)
-      )
-      .map(r => r.response_id)
-      .filter(id =>
-          !assigned.includes(id)
-      );
-  for (let i=remainingIds.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [remainingIds[i],remainingIds[j]]=[remainingIds[j],remainingIds[i]]; }
-  const take = remainingIds.slice(0, Math.max(0, n_assign - assigned.length));
-  const toAssign = assigned.concat(take).slice(0, n_assign);
+    // Sample remaining from candidates (exclude self & already assigned)
+    const remainingIds =
+      candidates
+        .filter(r =>
+            r.author !== String(reviewer_token)
+        )
+        .map(r => r.response_id)
+        .filter(id =>
+            !assigned.includes(id)
+        );
+    for (let i=remainingIds.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [remainingIds[i],remainingIds[j]]=[remainingIds[j],remainingIds[i]]; }
+    const take = remainingIds.slice(0, Math.max(0, n_assign - assigned.length));
+    const toAssign = assigned.concat(take).slice(0, n_assign);
 
-  // Persist newly assigned (append rows) — [session_id, reviewer_id, response_id, assigned_at]
-  const now = new Date();
-  const rowsToAppend = [];
-  take.forEach(id => rowsToAppend.push([session_id, String(reviewer_token), id, now]));
+    // Persist newly assigned, honouring the sheet's header order
+    const now = new Date();
+    const rowsToAppend = take.map(id => aHdr.map(h => {
+      switch (h) {
+        case 'session_id':     return session_id;
+        case 'reviewer_token': return String(reviewer_token);
+        case 'response_id':    return id;
+        case 'assigned_at':    return now;
+        default:               return '';
+      }
+    }));
 
-  if (rowsToAppend.length){
-    const startRow = shA.getLastRow() + 1;
-    shA.getRange(startRow, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
-  }
-  return { ok:true, assigned: toAssign };
+    if (rowsToAppend.length){
+      const startRow = shA.getLastRow() + 1;
+      shA.getRange(startRow, 1, rowsToAppend.length, aHdr.length).setValues(rowsToAppend);
+    }
+    return { ok:true, assigned: toAssign };
+  });
 }
 
 /** Submit peer feedback (free form)
@@ -935,28 +1010,30 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback
   const { header: hdr } = readTable(sh);
   const idx = (name)=>{ const i=hdr.indexOf(name); if (i===-1) throw new Error(`Missing column ${name} in PeerFeedback.`); return i; };
 
-  // feedback_id autoinc
-  const last = sh.getLastRow();
-  let nextId = 1;
-  if (last >= 2){
-    const ids = sh.getRange(2, idx('feedback_id')+1, last-1, 1).getValues().flat().map(Number).filter(n=>!isNaN(n));
-    nextId = (ids.length ? Math.max(...ids) : 0) + 1;
-  }
-
-  const row = hdr.map(h => {
-    switch(h){
-      case 'feedback_id':  return nextId;
-      case 'session_id':   return session_id;
-      case 'response_id':  return response_id;
-      case 'reviewer_token':  return String(reviewer_token||'');
-      case 'feedback_text':return outText;
-      case 'timestamp':    return new Date();
-      case 'is_hidden':    return 'FALSE';
-      default:             return '';
+  // feedback_id autoinc — allocate and append under the lock so IDs stay unique
+  return withScriptLock_(() => {
+    const last = sh.getLastRow();
+    let nextId = 1;
+    if (last >= 2){
+      const ids = sh.getRange(2, idx('feedback_id')+1, last-1, 1).getValues().flat().map(Number).filter(n=>!isNaN(n));
+      nextId = (ids.length ? Math.max(...ids) : 0) + 1;
     }
+
+    const row = hdr.map(h => {
+      switch(h){
+        case 'feedback_id':  return nextId;
+        case 'session_id':   return session_id;
+        case 'response_id':  return response_id;
+        case 'reviewer_token':  return String(reviewer_token||'');
+        case 'feedback_text':return outText;
+        case 'timestamp':    return new Date();
+        case 'is_hidden':    return 'FALSE';
+        default:             return '';
+      }
+    });
+    sh.appendRow(row);
+    return { ok:true, feedback_id: nextId };
   });
-  sh.appendRow(row);
-  return { ok:true, feedback_id: nextId };
 }
 
 /********************************
