@@ -245,6 +245,7 @@
   <script>
     // --- State ---
     let INSTRUCTOR_ID = '';
+    let AUTH_TOKEN = ''; // issued by apiInstructorLogin; required by every instructor API call
     let currentSessionId = '';
 
     let RESPONSES = [];
@@ -364,10 +365,11 @@
       google.script.run
         .withSuccessHandler(function (loginRes) {
           if (loginRes && loginRes.ok) {
+            AUTH_TOKEN = loginRes.token || '';
             google.script.run
               .withSuccessHandler(function (startRes) {
                 if (startRes && startRes.ok) {
-                  INSTRUCTOR_ID = inst;
+                  INSTRUCTOR_ID = loginRes.instructor_id || inst;
                   currentSessionId = sessionId;
                   HISTORY_WINDOW_MINS = 5;
 
@@ -386,7 +388,7 @@
                 msg.textContent = 'Start failed: ' + (err && err.message ? err.message : err);
                 btn.disabled = false;
               })
-              .apiStartSession(inst, sessionId, duration_mins);
+              .apiStartSession(AUTH_TOKEN, sessionId, duration_mins);
           } else {
             msg.style.color = '#c00';
             msg.textContent = (loginRes && loginRes.error) || 'Invalid login.';
@@ -450,7 +452,7 @@
         .withFailureHandler(err => {
           if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
         })
-        .apiStartPeerReview(INSTRUCTOR_ID, currentSessionId, mins, k);
+        .apiStartPeerReview(AUTH_TOKEN, currentSessionId, mins, k);
     }
 
     // Close peer review and return the session to the writing phase
@@ -469,7 +471,7 @@
         .withFailureHandler(err => {
           if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
         })
-        .apiSetPhase(INSTRUCTOR_ID, currentSessionId, 'writing');
+        .apiSetPhase(AUTH_TOKEN, currentSessionId, 'writing');
     }
 
     // Stop the session entirely (closes writing and peer review) and return to login
@@ -494,7 +496,7 @@
         .withFailureHandler(err => {
           alert('Stop failed: ' + (err && err.message ? err.message : err));
         })
-        .apiStopSession(INSTRUCTOR_ID, currentSessionId);
+        .apiStopSession(AUTH_TOKEN, currentSessionId);
     }
 
     // --- Load responses (auto refresh only) ---
@@ -567,7 +569,7 @@
                 render(); // re-render with merged model
               })
               .withFailureHandler(_err => { /* non-fatal; keep going without feedback */ })
-              .apiListFeedbackSummary(INSTRUCTOR_ID, currentSessionId);
+              .apiListFeedbackSummary(AUTH_TOKEN, currentSessionId);
           }
 
           // Sync CURRENT_PHASE from server so reviews appear/disappear automatically
@@ -588,8 +590,13 @@
               .apiGetActiveSessionForInstructor(INSTRUCTOR_ID);
           }
         })
-        .withFailureHandler(err=>{ console.error('Load failed:', err); })
-        .apiListResponsesByInstructor(INSTRUCTOR_ID, currentSessionId);
+        .withFailureHandler(err=>{
+          console.error('Load failed:', err);
+          // Surface errors such as an expired login instead of failing silently
+          document.getElementById('refreshStatus').textContent =
+            'Error: ' + (err && err.message ? err.message : err);
+        })
+        .apiListResponsesByInstructor(AUTH_TOKEN, currentSessionId);
     }
 
     // --- Render (cards with tags, delete, drag) ---
@@ -938,7 +945,7 @@
           alert('Save failed: ' + (err && err.message ? err.message : err));
           WRITE_IN_FLIGHT = false;
         })
-        .apiUpdateResponse(INSTRUCTOR_ID, responseId, { tags: next });
+        .apiUpdateResponse(AUTH_TOKEN, responseId, { tags: next });
     };
 
     // Persist the quality tag for a specific review item
@@ -971,7 +978,7 @@
           .withFailureHandler(err => {
             alert('Save review tag failed: ' + (err && err.message ? err.message : err));
           })
-          .apiUpdateFeedbackQuality(INSTRUCTOR_ID, currentSessionId, responseId, feedbackKey, quality);
+          .apiUpdateFeedbackQuality(AUTH_TOKEN, currentSessionId, responseId, feedbackKey, quality);
       }
     };
 
@@ -998,7 +1005,7 @@
         google.script.run
           .withSuccessHandler(()=>{ /* auto-refresh will pick up next tick */ })
           .withFailureHandler(err=>{ alert('Delete failed: ' + (err && err.message ? err.message : err)); })
-          .apiUpdateResponse(INSTRUCTOR_ID, responseId, { is_hidden: 'TRUE' });
+          .apiUpdateResponse(AUTH_TOKEN, responseId, { is_hidden: 'TRUE' });
       });
     }
 
@@ -1007,7 +1014,7 @@
       google.script.run
         .withSuccessHandler(()=>{ /* auto-refresh will pick up */ })
         .withFailureHandler(err=>{ alert('Save failed: ' + (err && err.message ? err.message : err)); })
-        .apiUpdateResponse(INSTRUCTOR_ID, id, { response_text_edited: text });
+        .apiUpdateResponse(AUTH_TOKEN, id, { response_text_edited: text });
     }
     function savePosition(id, x, y){
       // Persist position; keep using the write-in-flight pause set at drag end
@@ -1024,7 +1031,7 @@
           alert('Save failed: ' + (err && err.message ? err.message : err));
           WRITE_IN_FLIGHT = false;
         })
-        .apiUpdateResponse(INSTRUCTOR_ID, id, { pos_x: x, pos_y: y });
+        .apiUpdateResponse(AUTH_TOKEN, id, { pos_x: x, pos_y: y });
     }
 
     // --- Confidence chart (proper bars) ---

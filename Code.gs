@@ -165,7 +165,7 @@ function normalizePollValue(text) {
 }
 
 // ===== INSTRUCTORS & SESSIONS =====
-function getInstructorById(instructor_id) {
+function getInstructorById_(instructor_id) {
   const sh = getSheetByName(SHEET_INSTRUCTORS);
   const { header: hdr, rows } = readTable(sh);
   const idCol = hdr.indexOf('instructor_id');
@@ -232,7 +232,7 @@ function getPeerConfigForSession(session_id) {
 }
 
 // ===== RESPONSES I/O =====
-function writeResponse(payload) {
+function writeResponse_(payload) {
   const sh = getResponsesSheet();
   const { header } = getHeaderMap(sh);
   // ID allocation + append must be atomic, otherwise simultaneous submissions share an ID
@@ -250,7 +250,7 @@ function writeResponse(payload) {
     return id;
   });
 }
-function updateResponseModeration(response_id, updates) {
+function updateResponseModeration_(response_id, updates) {
   const sh = getResponsesSheet();
   const { header, colIndex } = getHeaderMap(sh);
   const idColZero = colIndex('response_id') - 1;
@@ -269,7 +269,7 @@ function updateResponseModeration(response_id, updates) {
   }
   return false;
 }
-function listResponses(session_id) {
+function listResponses_(session_id) {
   const sh = getResponsesSheet();
   const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   const data = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 0), sh.getLastColumn()).getValues();
@@ -391,7 +391,7 @@ function apiSubmitResponse(session_id, payload) {
     phase_at_submit: phase  // stamp phase at submit time
   };
 
-  const id = writeResponse(rowPayload);
+  const id = writeResponse_(rowPayload);
   return { ok: true, response_id: id };
 }
 
@@ -427,7 +427,7 @@ function submitResponse(response_text, unique_id, class_access_code_unused, sess
       response_text_masked = maskProfanity(text, profList);
       profanity_flag = 'MASKED';
     } else {
-      return { ok:true, response_id: writeResponse({
+      return { ok:true, response_id: writeResponse_({
         session_id,
         reviewer_token: String(reviewer_token || ''),
         response_text_original: text,
@@ -461,14 +461,69 @@ function submitResponse(response_text, unique_id, class_access_code_unused, sess
     phase_at_submit: phase
   };
 
-  const id = writeResponse(rowPayload);
+  const id = writeResponse_(rowPayload);
   return { ok:true, response_id:id };
 }
 
-// ===== INSTRUCTOR API =====
+// ===== INSTRUCTOR AUTH =====
+// Login issues a random token kept server-side in CacheService. Every instructor API call
+// must present that token; the instructor_id is taken from the token, never from the client.
+// NOTE: any top-level function whose name does NOT end in "_" can be called from the
+// browser via google.script.run, so internal helpers must end in "_".
+const AUTH_TOKEN_TTL_SECS = 6 * 60 * 60;  // CacheService maximum; renewed on every call
+const LOGIN_MAX_FAILS     = 5;            // failed attempts per instructor ID...
+const LOGIN_LOCKOUT_SECS  = 15 * 60;      // ...before logins are refused for this long
 
-/** Login with instructor_id + password */
+function hashPassword_(password, salt) {
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, salt + String(password), Utilities.Charset.UTF_8);
+  return 'sha256$' + salt + '$' + Utilities.base64Encode(bytes);
+}
+
+/** Accepts salted hashes ("sha256$salt$hash") and, for backwards compatibility, plaintext. */
+function checkPassword_(stored, password) {
+  stored = String(stored == null ? '' : stored);
+  if (!stored) return false;
+  if (stored.indexOf('sha256$') === 0) {
+    const salt = stored.split('$')[1] || '';
+    return hashPassword_(password, salt) === stored;
+  }
+  return stored === String(password);
+}
+
+/** Resolve a login token to its instructor_id, or throw. Renews the token's lifetime. */
+function requireInstructor_(token) {
+  const t = String(token || '');
+  const cache = CacheService.getScriptCache();
+  const instructor_id = t ? cache.get('inst_tok_' + t) : null;
+  if (!instructor_id) {
+    throw new Error('Your login has expired. Please reload the dashboard and log in again.');
+  }
+  cache.put('inst_tok_' + t, instructor_id, AUTH_TOKEN_TTL_SECS);
+  return instructor_id;
+}
+
+/** Throw unless session_id exists and belongs to instructor_id. */
+function requireSessionOwner_(instructor_id, session_id) {
+  const session = getSession(session_id);
+  if (!session || String(session.instructor_id) !== String(instructor_id)) {
+    throw new Error('Session not found or not owned by instructor.');
+  }
+  return session;
+}
+
+/** Login with instructor_id + password; returns a token for subsequent instructor calls */
 function apiInstructorLogin(instructor_id, password) {
+  const id = String(instructor_id || '').trim();
+  if (!id || !password) throw new Error('Invalid instructor ID or password.');
+
+  const cache = CacheService.getScriptCache();
+  const failKey = 'login_fail_' + id.toLowerCase();
+  const fails = Number(cache.get(failKey) || 0);
+  if (fails >= LOGIN_MAX_FAILS) {
+    throw new Error('Too many failed attempts. Please wait 15 minutes and try again.');
+  }
+
   const sh = getSheetByName(SHEET_INSTRUCTORS);
   const { header: hdr, rows } = readTable(sh);
 
@@ -477,14 +532,46 @@ function apiInstructorLogin(instructor_id, password) {
   const pwCol = col('password');
   const dnCol = hdr.indexOf('display_name');
 
-  const match = rows.find(r => String(r[idCol]) === String(instructor_id) && String(r[pwCol]) === String(password));
-  if (!match) throw new Error('Invalid instructor ID or password.');
-  return { ok:true, instructor_id, display_name: dnCol>=0 ? String(match[dnCol]||'') : '' };
+  const match = rows.find(r => String(r[idCol]).trim() === id && checkPassword_(r[pwCol], password));
+  if (!match) {
+    cache.put(failKey, String(fails + 1), LOGIN_LOCKOUT_SECS);
+    throw new Error('Invalid instructor ID or password.');
+  }
+  cache.remove(failKey);
+
+  const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  cache.put('inst_tok_' + token, id, AUTH_TOKEN_TTL_SECS);
+  return { ok:true, instructor_id: id, display_name: dnCol>=0 ? String(match[dnCol]||'') : '', token };
 }
 
+/**
+ * Run once from the Apps Script editor (select it in the function dropdown and click Run)
+ * to replace plaintext passwords in the Instructors sheet with salted hashes.
+ * Safe to re-run: already-hashed passwords are left alone. Reveals nothing if called remotely.
+ */
+function hashInstructorPasswords() {
+  const sh = getSheetByName(SHEET_INSTRUCTORS);
+  const { header: hdr, rows } = readTable(sh);
+  const pwCol = idxRequired(hdr, 'password');
+  let converted = 0;
+  rows.forEach((r, i) => {
+    const pw = String(r[pwCol] == null ? '' : r[pwCol]);
+    if (!pw || pw.indexOf('sha256$') === 0) return;
+    const salt = Utilities.getUuid().replace(/-/g, '');
+    sh.getRange(2 + i, pwCol + 1).setValue(hashPassword_(pw, salt));
+    converted++;
+  });
+  Logger.log(`Hashed ${converted} password(s).`);
+  return converted;
+}
+
+// ===== INSTRUCTOR API =====
+// All functions here take a login token (from apiInstructorLogin) as their first argument.
+
 /** Start session (phase always 'writing' initially) */
-function apiStartSession(instructor_id, session_id, duration_mins){
-  const inst = getInstructorById(instructor_id);
+function apiStartSession(token, session_id, duration_mins){
+  const instructor_id = requireInstructor_(token);
+  const inst = getInstructorById_(instructor_id);
   if (!inst) throw new Error('Instructor not found.');
 
   const sh = getSheetByName(SHEET_SESSIONS);
@@ -560,7 +647,8 @@ function apiStartSession(instructor_id, session_id, duration_mins){
 /** Set phase: writing | review (poll removed as a phase). 
  *  Optional: pass history_window_mins to persist to Sessions if the column exists.
  */
-function apiSetPhase(instructor_id, session_id, phase, history_window_mins) {
+function apiSetPhase(token, session_id, phase, history_window_mins) {
+  const instructor_id = requireInstructor_(token);
   const phases = new Set(['writing','review']);
   phase = String(phase || '').trim().toLowerCase();
   if (!phases.has(phase)) throw new Error('Invalid phase. Use writing|review');
@@ -644,7 +732,8 @@ function apiGetActiveSessionForInstructor(instructor_id) {
 }
 
 /** Stop session early */
-function apiStopSession(instructor_id, session_id) {
+function apiStopSession(token, session_id) {
+  const instructor_id = requireInstructor_(token);
   const sh = getSheetByName(SHEET_SESSIONS);
   const { header: hdr, rows } = readTable(sh);
 
@@ -667,11 +756,11 @@ function apiStopSession(instructor_id, session_id) {
 }
 
 /** List responses by instructor + session (for dashboard) */
-function apiListResponsesByInstructor(instructor_id, session_id) {
-  const session = getSession(session_id);
-  if (!session || String(session.instructor_id) !== String(instructor_id)) {
-    throw new Error('Session not found or not owned by instructor.');
-  }
+function apiListResponsesByInstructor(token, session_id) {
+  return listResponsesForInstructor_(requireInstructor_(token), session_id);
+}
+function listResponsesForInstructor_(instructor_id, session_id) {
+  requireSessionOwner_(instructor_id, session_id);
   const sh = getResponsesSheet();
   const values = sh.getDataRange().getValues();
   if (!values || values.length < 2) return [];
@@ -700,7 +789,9 @@ function apiListResponsesByInstructor(instructor_id, session_id) {
 }
 
 /** Update response fields (validate ownership via session mapping) */
-function apiUpdateResponse(instructor_id, response_id, patch) {
+function apiUpdateResponse(token, response_id, patch) {
+  const instructor_id = requireInstructor_(token);
+  patch = patch || {};
   const sh = getResponsesSheet();
   const values = sh.getDataRange().getValues();
   if (!values || values.length < 2) throw new Error('No responses.');
@@ -733,8 +824,8 @@ function apiUpdateResponse(instructor_id, response_id, patch) {
 }
 
 /** Export CSV for instructor + session */
-function apiExportCSV(instructor_id, session_id) {
-  const rows = apiListResponsesByInstructor(instructor_id, session_id);
+function apiExportCSV(token, session_id) {
+  const rows = listResponsesForInstructor_(requireInstructor_(token), session_id);
   const headers = Object.keys(rows[0] || {
     response_id:'', session_id:'', timestamp:'', reviewer_token:'', response_text_original:'', response_text_edited:'',
     is_poll:'', poll_value_normalized:'', is_hidden:'', is_pinned:'', order_weight:'', profanity_flag:'', confidence:'', tags:'', phase_at_submit:''
@@ -817,8 +908,9 @@ function apiGetResponseText(session_id, response_id) {
 /*********************************
  * OPEN peer review (instructor) *
  *********************************/
-function apiStartPeerReview(instructor_id, session_id, window_mins, reviews_per_student) {
-  if (!instructor_id || !session_id) throw new Error('Missing instructor or session.');
+function apiStartPeerReview(token, session_id, window_mins, reviews_per_student) {
+  const instructor_id = requireInstructor_(token);
+  if (!session_id) throw new Error('Missing session.');
 
   const sh = getSheetByName(SHEET_SESSIONS);
   const { header: hdr, rows } = readTable(sh);
@@ -1039,7 +1131,7 @@ function apiSubmitPeerFeedback(session_id, response_id, reviewer_token, feedback
 /********************************
  * Anonymised CSV for students  *
  ********************************/
-function apiGetPeerCsv(session_id) {
+function apiGetPeerCsv_(session_id) {
   if (!session_id) return { ok:false, error:'Missing session_id' };
 
   // Get assignment targets for this session
@@ -1084,7 +1176,7 @@ function apiGetPeerCsv(session_id) {
 }
 
 /** List feedback items for a response */
-function apiListFeedbackForResponse(session_id, response_id){
+function apiListFeedbackForResponse_(session_id, response_id){
   const sh = getPeerFeedbackSheet();
   const { header: hdr, rows } = readTable(sh);
   const idx = (name)=>{ const i=hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerFeedback.`); return i; };
@@ -1145,7 +1237,9 @@ function readSheetObjects_(sheet) {
  * Returns {ok:true, byResponse: { [response_id]: {count, items:[{id,text,timestamp,quality}]} } }
  * Only includes items where is_hidden is not TRUE, and session_id matches.
  */
-function apiListFeedbackSummary(instructor_id, session_id) {
+function apiListFeedbackSummary(token, session_id) {
+  // Auth errors are thrown (not returned) so the dashboard's failure handler sees them
+  requireSessionOwner_(requireInstructor_(token), session_id);
   try {
     const ss = SpreadsheetApp.getActive();
     const sh = ss.getSheetByName('PeerFeedback');
@@ -1201,7 +1295,9 @@ function apiListFeedbackSummary(instructor_id, session_id) {
    *   - feedback_id (preferred), or
    *   - timestamp (ISO) if you don’t have feedback_id on the client.
    */
-  function apiUpdateFeedbackQuality(instructor_id, session_id, response_id, feedback_key, quality) {
+  function apiUpdateFeedbackQuality(token, session_id, response_id, feedback_key, quality) {
+    // Auth errors are thrown (not returned) so the dashboard's failure handler sees them
+    requireSessionOwner_(requireInstructor_(token), session_id);
     try {
       const ss = SpreadsheetApp.getActive();
       const sh = ss.getSheetByName('PeerFeedback');
@@ -1283,7 +1379,7 @@ function apiListFeedbackSummary(instructor_id, session_id) {
     }
   }
 /** Return anonymized visible content for a session (non-hidden only) */
-function apiGetAnonymizedContent(session_id){
+function apiGetAnonymizedContent_(session_id){
   const shR = getResponsesSheet();
   const { header: hdr, rows } = readTable(shR);
   const idx = (name)=>{ const i=hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
@@ -1329,17 +1425,17 @@ function apiGetAnonymizedContent(session_id){
 // ===== DEBUG APIS =====
 
 /** Inspect Sessions headers quickly */
-function apiDebugSessionsHeaders(){
+function apiDebugSessionsHeaders_(){
   const sh = getSheetByName(SHEET_SESSIONS);
   const { header } = readTable(sh);
   return { ok:true, headers: header };
 }
 
 /** Inspect active session & counts for troubleshooting */
-function apiDebugSessionAndCounts(instructor_id, session_id){
+function apiDebugSessionAndCounts_(instructor_id, session_id){
   const info = apiGetActiveSessionForInstructor(instructor_id);
   let rows = [];
-  try { rows = apiListResponsesByInstructor(instructor_id, session_id); } catch(e){ rows = []; }
+  try { rows = listResponsesForInstructor_(instructor_id, session_id); } catch(e){ rows = []; }
   return {
     ok: true,
     active: info.active,

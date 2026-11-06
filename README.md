@@ -31,6 +31,27 @@ most recently opened peer review, as long as it was opened within the last
 The student page checks the session state once, when it loads. Students need to
 reload the page to see a phase change.
 
+## Instructor authentication
+
+- Logging in on the dashboard returns a random token, stored server-side in
+  `CacheService`. Every instructor action (starting sessions, peer review,
+  listing/editing/hiding responses, rating reviews) must present that token. The
+  instructor ID is taken from the token, so knowing an instructor's ID (which is
+  in every student link) isn't enough to act as them.
+- Tokens last 6 hours from the last dashboard action. When a token expires,
+  reload the dashboard and log in again.
+- After 5 failed logins for an instructor ID, logins for that ID are refused for
+  15 minutes.
+- **Hashing passwords:** passwords can be plaintext or salted SHA-256 hashes
+  (`sha256$<salt>$<hash>`). To convert existing plaintext passwords, open the
+  Apps Script editor, select `hashInstructorPasswords` in the function dropdown
+  and click **Run**. It's safe to re-run. To add an instructor later, type their
+  password in plaintext and run it again.
+- Any top-level function in `Code.gs` whose name doesn't end in `_` can be
+  called from the browser via `google.script.run`. Keep internal helpers named
+  with a trailing `_`, and make every instructor-only function start with
+  `requireInstructor_(token)`.
+
 ## Required Google Sheets
 
 All sheets need a header row in row 1 (except `ProfanityList`), and column
@@ -120,7 +141,7 @@ Stores instructor login credentials.
 Columns:
 
 - instructor_id
-- password
+- password — plaintext or a salted hash (see [Instructor authentication](#instructor-authentication))
 - display_name (optional)
 
 ---
