@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Instructor Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <?!= include('dashboard_styles') ?>
+</head>
+<body>
+
+  <!-- LOGIN VIEW -->
+  <div id="loginView">
+    <h2 style="margin:12px;">Instructor Dashboard</h2>
+    <div class="loginCard">
+      <form id="startForm" onsubmit="handleLoginAndStart(); return false;">
+        <!-- Instructor login -->
+        <div class="row">
+          <label style="min-width:160px;">Instructor ID</label>
+          <input id="inst" placeholder="e.g., cjon911" style="flex:1;" autocomplete="username">
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:160px;">Password</label>
+          <input id="instPw" type="password" placeholder="••••••••" style="flex:1;" autocomplete="current-password">
+        </div>
+
+        <!-- Session -->
+        <div class="row" style="margin-top:12px;">
+          <label style="min-width:160px;">Session ID</label>
+          <input id="newSessionId" placeholder="e.g., week_01_lec_02" style="flex:1;">
+        </div>
+        <fieldset class="presetPicker">
+          <legend>Activity</legend>
+          <label class="presetOption">
+            <input type="radio" name="preset" value="respond" checked>
+            <span><b>Quick response</b><br><small>Students write short answers or poll replies. You see them live as cards and charts.</small></span>
+          </label>
+          <label class="presetOption">
+            <input type="radio" name="preset" value="peer">
+            <span><b>Peer review</b><br><small>Students write, then review classmates' answers. You open the review when ready.</small></span>
+          </label>
+        </fieldset>
+        <div class="row" style="margin-top:8px;">
+          <label for="sessionDuration" style="min-width:160px;">Writing open for</label>
+          <input id="sessionDuration" type="number" min="1" max="1440" value="60" style="width:80px;">
+          <span>mins</span>
+        </div>
+
+        <div style="margin-top:12px;">
+          <button id="startBtn" type="submit" class="btn btn-view" aria-label="Start session" title="Start session">🔓<span class="btn-label">Open</span></button>
+          <span id="startMsg" style="margin-left:10px;color:#0a7;"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- DASHBOARD VIEW -->
+  <div id="dashView" style="display:none;">
+    <header>
+      <span><b>Session:</b> <span id="sessionLabel">—</span></span>
+      <span id="activityLabel" class="activityChip" title="Activity type, chosen at login"></span>
+      <label style="margin-left:12px;">Status: <span id="refreshStatus">Inactive</span></label>
+      <button class="btn btn-view" onclick="loadResponses()">
+        🔄 Refresh
+        </button>
+      <!-- View toggles -->
+      <span class="view-toggle">
+        <button type="button" class="btn btn-view" onclick="setViewCards()" aria-label="Card view" title="Card view">
+          📝 <span class="btn-label">Writing</span>
+        </button>
+        <button type="button" class="btn btn-view" onclick="setViewPoll()" aria-label="Poll view" title="Poll view">
+          📊 <span class="btn-label">Poll</span>
+        </button>
+      </span>
+
+      <span style="margin-left:12px;">
+        <label for="historyMins" style="margin-right:6px;">Show last</label>
+        <input id="historyMins" type="number" min="0" value="5" style="width:80px;" oninput="setHistoryWindow()" />
+        <span>mins</span>
+      </span>
+
+      <!-- Peer review controls: only shown for sessions with peer review enabled -->
+      <span id="peerControls" style="margin-left:12px; display:none;">
+        <button type="button" class="btn btn-view" onclick="openPeerReview()" aria-label="Peer review" title="Peer review">👥<span class="btn-label">Peer review</span></button>
+        <label for="peerK" style="margin-right:6px;">Reviews per student</label>
+        <input id="peerK" type="number" min="1" value="1" style="width:64px;">
+        <label for="peerUntil" style="margin:0 6px 0 8px;" title="Optional. Students can submit reviews until this time, even after the session ends. Leave blank for no deadline.">Reviews close</label>
+        <input id="peerUntil" type="datetime-local" onchange="peerDeadlineChanged()" title="Optional. Leave blank for no deadline.">
+        <button type="button" class="btn btn-view" onclick="closeReviewsNow()" aria-label="Close reviews now" title="Stop accepting reviews now (received reviews stay visible)">🔒<span class="btn-label">Close reviews</span></button>
+        <button type="button" class="btn btn-view" onclick="backToWriting()" aria-label="Back to writing" title="End peer review and reopen writing">✏️<span class="btn-label">Back to writing</span></button>
+        <span id="peerStatus" class="debugChip"></span>
+      </span>
+
+      <span style="margin-left:12px;">
+        <span id="writingState" class="debugChip"></span>
+        <button type="button" class="btn btn-view" onclick="extendWriting(30)" aria-label="Extend writing 30 minutes" title="Keep writing open for 30 more minutes (reopens it if stopped or expired)">⏱<span class="btn-label">+30 min</span></button>
+        <button type="button" class="btn btn-stop" onclick="stopSession()" aria-label="Stop session" title="Close writing now. Peer review continues until its deadline.">⏹<span class="btn-label">Stop session</span></button>
+      </span>
+
+    </header>
+    
+    <!-- Poll (first-word tally) -->
+    <div id="pollPanel" class="list" style="padding:12px; border-top:1px solid #eee; display:none;">
+      <div class="panelTitle">Poll results</div>
+      <canvas id="pollChart" width="600" height="240" style="max-width:100%;"></canvas>
+    </div>
+
+    <!-- Board for responses -->
+    <div id="listView" class="list board"></div>
+
+    <!-- Confidence bar chart -->
+    <div id="confidencePanel" class="list" style="display:none;padding:12px; border-top:1px solid #eee;">
+      <div class="panelTitle">Class confidence level</div>
+      <canvas id="confidenceChart" width="600" height="240" style="max-width: 100%;"></canvas>
+    </div>
+  </div>
+
+  <?!= include('dashboard_core') ?>
+  <?!= include('dashboard_peer') ?>
+</body>
+</html>

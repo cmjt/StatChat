@@ -1,0 +1,156 @@
+  <style>
+    body, button, input, select, textarea { font-family: 'Inter', sans-serif;}
+    body { margin: 0; }
+    header { display: flex; gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid #ddd; }
+    .list { padding: 12px; display: grid; gap: 8px; }
+    :root {
+      --sta-blue: #00539b;
+      --sta-blue-hover: #007bc2;
+      --danger: #b42318;
+      --danger-hover: #8f1d14;
+      --border: #d0d5dd;
+      --text-light: #ffffff;
+    }
+
+    /* Layout */
+    .view-toggle { margin-left: 12px; display: inline-flex; gap: 6px; }
+
+    /* Base button */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.8rem;
+      font-size: 0.9rem;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      border-radius: 999px; /* pill shape */
+      border: 1px solid transparent;
+      cursor: pointer;
+      line-height: 1;
+      background: none;
+      transition: background-color 0.15s ease, transform 0.05s ease;
+    }
+
+    .btn:active { transform: translateY(1px); }
+    .btn:focus-visible { outline: 3px solid #84c5f4; outline-offset: 2px; }
+
+    /* Stop (danger) */
+    .btn-stop { background-color: var(--danger); color: var(--text-light); }
+    .btn-stop:hover { background-color: var(--danger-hover); }
+
+    /* View buttons */
+    .btn-view { background-color: var(--sta-blue); color: var(--text-light); }
+    .btn-view:hover { background-color: var(--sta-blue-hover); }
+
+    /* Board container */
+    #listView.board { position: relative; display: grid !important; min-height: 70vh; padding: 12px; background: #fff; overflow: auto; align-items: start; align-content: start;}
+
+    /* Cards */
+    .card {
+      border: 3px solid #00539b;
+      border-radius: 8px;
+      padding: 12px;    
+      background: #e9f7ff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .card [contenteditable="true"] {background: #ffffff;padding: 8px;border-radius: 6px;overflow-wrap: anywhere;word-break: break-word;}
+    .card.boardItem { position: absolute; box-sizing: border-box; }
+    .hidden { opacity: 0.4; }
+    .pinned { border-color: #0a7; }
+
+    .rowTop { display: flex; justify-content: space-between; align-items: center; }
+    .leftTop { display: inline-flex; align-items: center; gap: 8px; }
+    .drag { cursor: grab; user-select: none; font-weight: bold; }
+    .drag:active { cursor: grabbing; }
+
+    .loginCard { padding:12px; max-width:560px; border:1px solid #eee; border-radius:8px; background:#fafafa; margin: 12px; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .panelTitle { font-weight:600; margin-bottom:6px; }
+
+    /* Tags */
+    .tagRow { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .tagBtn { padding:4px 10px; border:1px solid #ddd; border-radius:12px; background:#f7f7f7; cursor:pointer; }
+    .tagBtn.selected { background:#0a7; color:#fff; border-color:#0a7; }
+    .tagGroupLabel { font-weight:600; margin-right:4px; }
+    .tagSummary { margin-left:auto; color:#666; }
+
+    /* Confidence badge */
+    .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:0.78rem; line-height:1.4; margin-left:8px; border:1px solid #ddd; background:#fafafa; }
+    .badge.c1 { 
+      background: rgba(219, 234, 254, 0.7);   /* #dbeafe */
+      color: #1e3a8a;
+      border: 1px solid rgba(147, 197, 253, 0.8);
+    }
+
+    .badge.c2 { 
+      background: rgba(147, 197, 253, 0.65);  /* #93c5fd */
+      color: #1d4ed8;
+      border: 1px solid rgba(59, 130, 246, 0.8);
+    }
+
+    .badge.c3 { 
+      background: rgba(59, 130, 246, 0.6);    /* #3b82f6 */
+      color: #ffffff;
+      border: 1px solid rgba(29, 78, 216, 0.85);
+    }
+
+    .badge.c4 { 
+      background: rgba(29, 78, 216, 0.75);    /* #1d4ed8 */
+      color: #ffffff;
+      border: 1px solid rgba(30, 58, 138, 0.9);
+    }
+
+    .badge.c5 { 
+      background: rgba(30, 58, 138, 0.9);     /* #1e3a8a */
+      color: #ffffff;
+      border: 1px solid #1e3a8a;
+    }
+    .badge.flag { background:#fef3c7; color:#92400e; border:1px solid #f59e0b; margin-left:0; margin-right:6px; }
+    /* Delete button */
+    .pinBtn { cursor:pointer; background:none; border:none; padding:2px 6px; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
+    .pinBtn svg{ width:18px; height:18px; stroke:#666; fill:none; stroke-width:1.8; transition:all 140ms ease; }
+    .pinBtn:focus-visible{ outline:2px solid #60a5fa; border-radius:4px; }
+
+    /* Debug chip */
+    .debugChip { margin-left: 8px; color:#666; font-size:0.85rem; }
+
+    /* Poll mode layout */
+    #dashView.mode-poll #listView { display: none !important; }
+    #dashView.mode-poll #confidencePanel { margin-top: 0; }
+
+    /* Peer feedback text wrapping */
+    .peerFbItem { white-space: pre-wrap; }
+    /* Review quality tags (per review) */
+    .revTagRow {
+      margin-top: 6px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .revTagBtn {
+      padding: 3px 8px;
+      border: 1px solid var(--border, #ddd);
+      border-radius: 12px;
+      background: #f7f7f7;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .revTagBtn.selected {
+      background: var(--uoa-blue, #15538A);
+      color: #fff;
+      border-color: var(--uoa-blue, #15538A);
+    }
+    /* Activity preset picker (login) and activity chip (header) */
+    .presetPicker { margin:12px 0 0; padding:8px 10px; border:1px solid #ddd; border-radius:8px; }
+    .presetPicker legend { font-weight:600; padding:0 4px; }
+    .presetOption { display:flex; gap:8px; align-items:flex-start; padding:6px 0; cursor:pointer; }
+    .presetOption small { color:#555; }
+    .activityChip { margin-left:8px; padding:2px 10px; border-radius:12px; background:#e9f7ff; border:1px solid #00539b; color:#00539b; font-size:0.85rem; }
+    .activityChip:empty { display:none; }
+  </style>

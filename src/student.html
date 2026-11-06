@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Class Response</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <?!= include('student_styles') ?>
+</head>
+<body>
+  <div class="container">
+    <h2>Share your response</h2>
+
+    <div class="banner" id="infoBanner">
+      <div>
+        <strong>Note:</strong> By submitting, you agree that your response may be shown during class discussion. Responses are submitted anonymously and will be deleted at the end of the course.
+      </div>
+      <div class="small" style="margin-top:8px;">
+        <span><b>Instructor:</b> <span id="instLabel">—</span></span>
+        &nbsp;|&nbsp;
+        <span><b>Activity:</b> <span id="activityLabel">—</span></span>
+        &nbsp;|&nbsp;
+        <span><b>Session:</b> <span id="sessionLabel">—</span></span>
+        &nbsp;|&nbsp;
+        <span><b>Status:</b> <span id="sessionStatus">Resolving…</span></span>
+         <!--&nbsp;|&nbsp;
+        <span class="countdown"><span id="countdown">—</span></span>-->
+      </div>
+      <div id="phaseToast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- Response -->
+    <div style="margin-top:10px;">
+      <div id="modeNote" class="small" style="margin-bottom:6px; display:none;"></div>
+      <label for="responseText">Your response</label>
+      <textarea id="responseText" placeholder="Write your answer…" disabled></textarea>
+      <div class="small" id="wordCount" style="margin-top:6px;">Words: 0</div>
+    </div>
+    
+    <!-- Confidence buttons -->
+    <div style="margin-top:10px;">
+      <button id="toggleBtn" style="font-weight:bold;">+</button>
+      <div id="collapsible" style="display:none; margin-top:10px; padding:6px; border:1px solid #ccc; border-radius:4px;">
+        <label>Confidence level</label>
+        <input type="hidden" id="confidence" value="0">
+        <div class="confidence-buttons" style="display:flex; gap:6px; margin-top:4px;">
+          <button type="button" class="conf-btn" data-value="0">N/A</button>
+          <button type="button" class="conf-btn" data-value="1">1</button>
+          <button type="button" class="conf-btn" data-value="2">2</button>
+          <button type="button" class="conf-btn" data-value="3">3</button>
+          <button type="button" class="conf-btn" data-value="4">4</button>
+          <button type="button" class="conf-btn" data-value="5">5</button>
+        </div>
+
+        <div style="margin-top:4px;">
+          Selected: <span id="confVal">...</span>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- Submit -->
+    <div style="margin-top:12px;">
+      <button id="submitBtn" disabled onclick="submitResponse()" class="btn btn-view" aria-label="Submit" title="Submit">➤<span class="btn-label">Submit</span></button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <!-- Peer Review Panel -->
+    <div id="reviewPanel"
+        class="banner"
+        style="display:none; margin-top:12px;">
+      <div>
+        <strong>Peer review</strong>
+        Remember that everyone is doing their best. Make sure to provide constructive comments on others' work.
+      </div>
+      <div id="reviewDeadline" class="small" style="margin-top:6px;"></div>
+      <div id="assignments"></div>
+    </div>
+    <!-- Feedback Received Panel -->
+    <div id="myFeedbackPanel"
+        class="banner"
+        style="display:none; margin-top:12px;">
+      <div style="display:flex;
+                  justify-content:space-between;
+                  align-items:center;">
+        <strong id="feedbackHeading">Feedback received</strong>
+        <button class="btn btn-view btn-small"
+          onclick="refreshMyFeedback()">
+          ↻ 
+        </button>
+      </div>
+      <div id="myFeedback"
+          style="margin-top:8px;">
+      </div>
+    </div>
+
+  <?!= include('student_core') ?>
+  <?!= include('student_peer') ?>
+  <script>init();</script>
+</body>
+</html>

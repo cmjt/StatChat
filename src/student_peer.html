@@ -1,0 +1,253 @@
+  <!-- student_peer: peer review: assignments, review submission, received feedback -->
+  <script>
+    const MIN_FEEDBACK_WORDS = 10; // must match the check in apiSubmitPeerFeedback (src/PeerReview.gs)
+    // Inline peer review
+    function maybeLoadAssignments(){
+      const uid = REVIEWER_TOKEN;
+      const reviewEl = document.getElementById('reviewPanel');
+      if (!uid || !SESSION_ID) { reviewEl.style.display = 'none'; return; }
+
+      // Build once per session/review state (VIEW_GEN); skip if loaded or already loading
+      if (ASSIGNMENTS_LOADED || ASSIGNMENTS_LOADING_GEN === VIEW_GEN) return;
+      ASSIGNMENTS_LOADING_GEN = VIEW_GEN;
+      const gen = VIEW_GEN;
+
+      google.script.run
+        .withSuccessHandler(function(hasRes){
+          if (gen !== VIEW_GEN) return; // the page has moved on (new session or review state)
+          if (hasRes && hasRes.ok && hasRes.has) {
+            reviewEl.style.display = 'block';
+            loadAssignedReviewTasks(uid, gen);
+          } else {
+            reviewEl.style.display = 'none';
+            setStatus(REVIEWS_OPEN ? 'Submit at least one response to participate in peer review.' : 'Peer review has closed. You didn\'t submit a response in this session.', true);
+          }
+        })
+        .withFailureHandler(err=>{ setStatus('Check failed: ' + (err && err.message ? err.message : err), true); })
+        .apiHasSubmitted(SESSION_ID, uid);
+    }
+    function loadAssignedReviewTasks(uid, gen){
+      google.script.run
+        .withSuccessHandler(function(assign){
+          if (gen !== VIEW_GEN) return;
+          const cont = document.getElementById('assignments');
+          cont.innerHTML = '';
+          const ids = (assign && assign.ok && Array.isArray(assign.assigned)) ? assign.assigned : [];
+          if (!ids.length){
+            cont.innerHTML = REVIEWS_OPEN
+              ? '<div class="small">No assignments yet…</div>'
+              : '<div class="small">Peer review closed before you were assigned any reviews, so received feedback isn\'t available.</div>';
+            return;
+          }
+
+          // fetch completed list to gray out/disable
+          google.script.run
+            .withSuccessHandler(function(done){
+              if (gen !== VIEW_GEN) return;
+              const completed = (done && done.ok && Array.isArray(done.completed)) ? new Set(done.completed) : new Set();
+
+              ids.forEach(rid=>{
+                const card = document.createElement('div'); card.className='card';
+                const isDone = completed.has(String(rid));
+                const locked = isDone || !REVIEWS_OPEN; // no new reviews after the deadline
+                card.classList.toggle('completed', locked);
+                card.innerHTML = `
+                  <div><b>Response #${rid}</b></div>
+                  <div id="snippet_${rid}" class="small" style="margin:6px 0; color:#444;">Loading text…</div>
+                  <textarea id="fb_${rid}" placeholder="Write feedback (at least ${MIN_FEEDBACK_WORDS} words) that is constructive, respectful, and supports shared understanding." rows="3" ${locked ? 'disabled' : ''}></textarea>
+                  <div style="margin-top:8px;">
+                    <button
+                      type="button"
+                      class="btn-bot"
+                      onclick="markAsBot('${rid}')"
+                      title="I think this may be AI-generated"
+                      ${locked ? 'disabled' : ''}>
+                      🤖
+                    </button>
+                  </div>
+                  <div style="margin-top:8px;">
+                    <button id="btn_${rid}" class="btn btn-view" onclick="submitFeedback('${rid}')" ${locked ? 'disabled' : ''}>${isDone ? 'Submitted' : (REVIEWS_OPEN ? 'Submit feedback' : 'Closed')}</button>
+                  </div>
+                `;
+                cont.appendChild(card);
+
+                // Fetch and inject the submission text for this assignment
+                google.script.run
+                  .withSuccessHandler(res => {
+                    const el = document.getElementById('snippet_' + rid);
+                    if (!el) return;
+                    if (res && res.ok && typeof res.text === 'string') {
+                      const safe = String(res.text).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+                      el.innerHTML = safe || '<span class="small" style="color:#888;">(no text)</span>';
+                    } else {
+                      el.innerHTML = '<span class="small err">Text unavailable.</span>';
+                    }
+                  })
+                  .withFailureHandler(err => {
+                    const el = document.getElementById('snippet_' + rid);
+                    if (el) el.innerHTML = '<span class="small err">Failed to load text.</span>';
+                  })
+                  .apiGetResponseText(SESSION_ID, rid);
+                            });
+
+              // Show the feedback panel once assignments are loaded: received feedback if
+              // all assigned reviews are done (the server checks this too), otherwise why not
+              const feedbackPanel = document.getElementById('myFeedbackPanel');
+              const allDone = ids.length > 0 && ids.every(id => completed.has(String(id)));
+              if (feedbackPanel) {
+                feedbackPanel.style.display = 'block';
+                if (allDone) loadMyFeedback();
+                else document.getElementById('myFeedback').innerHTML = lockedFeedbackMessage();
+              }
+              ASSIGNMENTS_LOADED = true;
+              ASSIGNED_IDS = ids.slice();
+
+            })
+            .withFailureHandler(err => {
+              document.getElementById('assignments').innerHTML =
+                '<div class="small err">Error loading completed status.</div>';
+            })
+            .apiListFeedbackByReviewer(
+              SESSION_ID,
+              uid
+            );
+
+        })
+        .withFailureHandler(err => {
+          document.getElementById('assignments').innerHTML =
+            '<div class="small err">Error loading assignments.</div>';
+        })
+        .apiAssignPeerTargets(
+          SESSION_ID,
+          uid
+        );
+    }
+    // Shown in place of received feedback when the student hasn't completed all their reviews
+    function lockedFeedbackMessage(){
+      return REVIEWS_OPEN
+        ? '<div class="small">Submit all assigned peer reviews to unlock received feedback.</div>'
+        : '<div class="small">Peer review has closed. Received feedback is only available to students who completed all their assigned reviews.</div>';
+    }
+    function markAsBot(rid){
+      const ta =
+        document.getElementById('fb_' + rid);
+      if (!ta) return;
+      ta.value =
+        'Possibly AI-generated because: ';
+      ta.focus();
+    }
+    function submitFeedback(rid){
+      const uid = REVIEWER_TOKEN;
+      const ta = document.getElementById('fb_' + rid);
+      const txt = ta ? (ta.value || '').trim() : '';
+      const btn = document.getElementById('btn_' + rid);
+      if (!uid || !SESSION_ID) { setStatus('Missing session or ID.', true); return; }
+      if (!txt) { setStatus('Write feedback.', true); return; }
+      if (countWords(txt) < MIN_FEEDBACK_WORDS) {
+        setStatus(`Please write at least ${MIN_FEEDBACK_WORDS} words (you have ${countWords(txt)}).`, true);
+        return;
+      }
+      if (btn) btn.disabled = true; // prevent double submission while the request is in flight
+
+      google.script.run
+        .withSuccessHandler(function(res){
+          if (res && res.ok) {
+            // Local-only UI update (no rebuild)
+            if (ta) { ta.value = ''; ta.disabled = true; }
+            if (btn) { btn.disabled = true; btn.textContent = 'Submitted'; }
+            const card = ta?.closest('.card'); if (card) card.classList.add('completed');
+
+            // Unlock received feedback only once every assigned review is submitted
+            refreshMyFeedback();
+
+          } else {
+            setStatus((res && res.error) || 'Feedback failed.', true);
+            if (btn) btn.disabled = false;
+          }
+        })
+        .withFailureHandler(err=>{
+          setStatus('Feedback failed: ' + (err && err.message ? err.message : err), true);
+          if (btn) btn.disabled = false;
+        })
+        .apiSubmitPeerFeedback(SESSION_ID, rid, uid, txt);
+    }
+ function loadMyFeedback() {
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res || !res.ok) return;
+      const panel =
+        document.getElementById('myFeedbackPanel');
+      const container =
+        document.getElementById('myFeedback');
+      const heading =
+        document.getElementById('feedbackHeading');
+
+      // The server only releases feedback once all assigned reviews are done
+      if (res.locked) {
+        if (heading) heading.textContent = 'Feedback received';
+        container.innerHTML = lockedFeedbackMessage();
+        return;
+      }
+
+      if (heading) {
+        heading.textContent =
+          `Feedback received (${res.feedback.length})`;
+      }
+
+      if (!res.feedback.length) {
+        container.innerHTML =
+          '<div class="small">No feedback received yet.</div>';
+        return;
+      }
+      panel.style.display = 'block';
+      container.innerHTML =
+        res.feedback.map(f => `
+          <div class="card" style="margin-top:8px;">
+            <div style="
+              margin-bottom:8px;
+              padding:8px;
+              background:#f3f4f6;
+              border-radius:6px;
+            ">
+              <strong>Your response</strong><br>
+              ${escapeHtml(f.response_text)}
+            </div>
+            <strong>Peer feedback</strong><br>
+            ${escapeHtml(f.feedback)}
+          </div>
+        `).join('');
+    })
+    .withFailureHandler(err => {
+      console.error(
+        "LOAD MY FEEDBACK ERROR:",
+        err
+      );
+    })
+  .apiGetMyFeedback(
+    SESSION_ID,
+    REVIEWER_TOKEN
+  );
+}
+    // Re-check which assigned reviews are done (server is the source of truth),
+    // then load received feedback only once all of them are submitted.
+    function refreshMyFeedback() {
+      if (!SESSION_ID || !ASSIGNED_IDS.length) return;
+      const uid = REVIEWER_TOKEN;
+      google.script.run
+        .withSuccessHandler(done => {
+          const completed = new Set(
+            (done && done.ok && Array.isArray(done.completed)) ? done.completed.map(String) : []
+          );
+          const allDone = ASSIGNED_IDS.every(id => completed.has(String(id)));
+          if (allDone) {
+            loadMyFeedback();
+          } else {
+            document.getElementById('myFeedback').innerHTML = lockedFeedbackMessage();
+          }
+        })
+        .withFailureHandler(err => {
+          setStatus('Refresh failed: ' + (err && err.message ? err.message : err), true);
+        })
+        .apiListFeedbackByReviewer(SESSION_ID, uid);
+    }
+  </script>

@@ -1,0 +1,127 @@
+  <!-- dashboard_peer: peer review controls, deadline and review quality ratings -->
+  <script>
+    function openPeerReview(){
+      // Basic guards
+      if (!INSTRUCTOR_ID || !currentSessionId) {
+        alert('Missing instructor or session. Start a session first.');
+        return;
+      }
+      // Reviews per student
+      const kInput = document.getElementById('peerK');
+      const k = Math.max(1, Number(kInput ? kInput.value : 1) || 1);
+      const statusEl = document.getElementById('peerStatus');
+      const peerUntilIso = getPeerUntilIso();
+      if (peerUntilIso && new Date(peerUntilIso) <= new Date()) {
+        alert('The review deadline must be in the future (or leave it blank for no deadline).');
+        return;
+      }
+
+      if (statusEl) statusEl.textContent = 'Opening...';
+
+      // Call the server to open peer review for this session
+      google.script.run
+        .withSuccessHandler(res => {
+          if (!res || !res.ok) {
+            if (statusEl) statusEl.textContent = (res && res.error) ? ('Error: ' + res.error) : 'Failed to open';
+            return;
+          }
+          // Reflect locally that we've switched to review, then pull the authoritative state
+          CURRENT_PHASE = 'review';
+          refreshSessionState();
+        })
+        .withFailureHandler(err => {
+          if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
+        })
+        .apiStartPeerReview(AUTH_TOKEN, currentSessionId, k, peerUntilIso);
+    }
+    // --- Review deadline helpers ---
+    // datetime-local values are in the browser's local time; convert to/from ISO (UTC)
+    function getPeerUntilIso(){
+      const v = (document.getElementById('peerUntil').value || '').trim();
+      if (!v) return '';
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? '' : d.toISOString();
+    }
+    function toLocalInputValue(iso){
+      const d = iso ? new Date(iso) : null;
+      if (!d || isNaN(d.getTime())) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    // Changing the deadline while peer review is open saves it immediately
+    function peerDeadlineChanged(){
+      if (!SESSION_STATE || !SESSION_STATE.peer_open) return; // used when peer review is opened
+      const iso = getPeerUntilIso();
+      if (iso && new Date(iso) <= new Date()) {
+        alert('The review deadline must be in the future. Use "Close reviews" to close them now.');
+        refreshSessionState();
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(() => refreshSessionState())
+        .withFailureHandler(err => {
+          alert('Could not change deadline: ' + (err && err.message ? err.message : err));
+          refreshSessionState();
+        })
+        .apiSetPeerDeadline(AUTH_TOKEN, currentSessionId, iso);
+    }
+    function closeReviewsNow(){
+      if (!currentSessionId) return;
+      if (!SESSION_STATE || !SESSION_STATE.peer_open) { alert('Peer review is not open.'); return; }
+      if (!confirm('Stop accepting peer reviews now? Students (and you) can still read reviews already submitted.')) return;
+      google.script.run
+        .withSuccessHandler(() => refreshSessionState())
+        .withFailureHandler(err => alert('Could not close reviews: ' + (err && err.message ? err.message : err)))
+        .apiCloseReviews(AUTH_TOKEN, currentSessionId);
+    }
+    // Close peer review and return the session to the writing phase
+    function backToWriting(){
+      if (!INSTRUCTOR_ID || !currentSessionId) return;
+      if (!confirm('End peer review and reopen writing? Students can no longer submit or read reviews for this session. Students need to reload their page to see the change.')) return;
+      const statusEl = document.getElementById('peerStatus');
+      if (statusEl) statusEl.textContent = 'Closing...';
+      google.script.run
+        .withSuccessHandler(() => {
+          CURRENT_PHASE = 'writing';
+          render();
+          refreshSessionState();
+        })
+        .withFailureHandler(err => {
+          if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
+        })
+        .apiSetPhase(AUTH_TOKEN, currentSessionId, 'writing');
+    }
+    // Persist the quality tag for a specific review item
+    window.setReviewQuality = function(responseId, feedbackKey, quality, btnEl) {
+      // 1) Optimistic UI update: mark selected in this button group
+      const row = btnEl && btnEl.closest('.revTagRow');
+      if (row) {
+        row.querySelectorAll('.revTagBtn').forEach(b => {
+          const q = b.getAttribute('data-q') || '';
+          b.classList.toggle('selected', q === quality);
+        });
+      }
+
+      // 2) Update local cache so selection survives re-render until next batch refresh
+      const rid = String(responseId);
+      const fbObj = FEEDBACK_BY_RESPONSE[rid];
+      if (fbObj && Array.isArray(fbObj.items)) {
+        const it = fbObj.items.find(x => String((x && (x.id ?? x.timestamp))) === String(feedbackKey));
+        if (it) it.quality = quality;
+      }
+
+      // Record/refresh the local override with a timestamp
+      if (!LOCAL_REVIEW_QUALITY[rid]) LOCAL_REVIEW_QUALITY[rid] = Object.create(null);
+      LOCAL_REVIEW_QUALITY[rid][String(feedbackKey)] = { quality: String(quality || ''), ts: Date.now() };
+
+      // 3) Persist to server (optional no-op if not in Apps Script context)
+      if (inAppsScript()) {
+        google.script.run
+          .withSuccessHandler(() => { /* saved */ })
+          .withFailureHandler(err => {
+            alert('Save review tag failed: ' + (err && err.message ? err.message : err));
+          })
+          .apiUpdateFeedbackQuality(AUTH_TOKEN, currentSessionId, responseId, feedbackKey, quality);
+      }
+    };
+  </script>

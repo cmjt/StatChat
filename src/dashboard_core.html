@@ -1,283 +1,26 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Instructor Dashboard</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body, button, input, select, textarea { font-family: 'Inter', sans-serif;}
-    body { margin: 0; }
-    header { display: flex; gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid #ddd; }
-    .list { padding: 12px; display: grid; gap: 8px; }
-    :root {
-      --sta-blue: #00539b;
-      --sta-blue-hover: #007bc2;
-      --danger: #b42318;
-      --danger-hover: #8f1d14;
-      --border: #d0d5dd;
-      --text-light: #ffffff;
-    }
-
-    /* Layout */
-    .view-toggle { margin-left: 12px; display: inline-flex; gap: 6px; }
-
-    /* Base button */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.45rem 0.8rem;
-      font-size: 0.9rem;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      border-radius: 999px; /* pill shape */
-      border: 1px solid transparent;
-      cursor: pointer;
-      line-height: 1;
-      background: none;
-      transition: background-color 0.15s ease, transform 0.05s ease;
-    }
-
-    .btn:active { transform: translateY(1px); }
-    .btn:focus-visible { outline: 3px solid #84c5f4; outline-offset: 2px; }
-
-    /* Stop (danger) */
-    .btn-stop { background-color: var(--danger); color: var(--text-light); }
-    .btn-stop:hover { background-color: var(--danger-hover); }
-
-    /* View buttons */
-    .btn-view { background-color: var(--sta-blue); color: var(--text-light); }
-    .btn-view:hover { background-color: var(--sta-blue-hover); }
-
-    /* Board container */
-    #listView.board { position: relative; display: grid !important; min-height: 70vh; padding: 12px; background: #fff; overflow: auto; align-items: start; align-content: start;}
-
-    /* Cards */
-    .card {
-      border: 3px solid #00539b;
-      border-radius: 8px;
-      padding: 12px;    
-      background: #e9f7ff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-    .card [contenteditable="true"] {background: #ffffff;padding: 8px;border-radius: 6px;overflow-wrap: anywhere;word-break: break-word;}
-    .card.boardItem { position: absolute; box-sizing: border-box; }
-    .hidden { opacity: 0.4; }
-    .pinned { border-color: #0a7; }
-
-    .rowTop { display: flex; justify-content: space-between; align-items: center; }
-    .leftTop { display: inline-flex; align-items: center; gap: 8px; }
-    .drag { cursor: grab; user-select: none; font-weight: bold; }
-    .drag:active { cursor: grabbing; }
-
-    .loginCard { padding:12px; max-width:560px; border:1px solid #eee; border-radius:8px; background:#fafafa; margin: 12px; }
-    .row { display:flex; gap:8px; align-items:center; }
-    .panelTitle { font-weight:600; margin-bottom:6px; }
-
-    /* Tags */
-    .tagRow { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-    .tagBtn { padding:4px 10px; border:1px solid #ddd; border-radius:12px; background:#f7f7f7; cursor:pointer; }
-    .tagBtn.selected { background:#0a7; color:#fff; border-color:#0a7; }
-    .tagGroupLabel { font-weight:600; margin-right:4px; }
-    .tagSummary { margin-left:auto; color:#666; }
-
-    /* Confidence badge */
-    .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:0.78rem; line-height:1.4; margin-left:8px; border:1px solid #ddd; background:#fafafa; }
-    .badge.c1 { 
-      background: rgba(219, 234, 254, 0.7);   /* #dbeafe */
-      color: #1e3a8a;
-      border: 1px solid rgba(147, 197, 253, 0.8);
-    }
-
-    .badge.c2 { 
-      background: rgba(147, 197, 253, 0.65);  /* #93c5fd */
-      color: #1d4ed8;
-      border: 1px solid rgba(59, 130, 246, 0.8);
-    }
-
-    .badge.c3 { 
-      background: rgba(59, 130, 246, 0.6);    /* #3b82f6 */
-      color: #ffffff;
-      border: 1px solid rgba(29, 78, 216, 0.85);
-    }
-
-    .badge.c4 { 
-      background: rgba(29, 78, 216, 0.75);    /* #1d4ed8 */
-      color: #ffffff;
-      border: 1px solid rgba(30, 58, 138, 0.9);
-    }
-
-    .badge.c5 { 
-      background: rgba(30, 58, 138, 0.9);     /* #1e3a8a */
-      color: #ffffff;
-      border: 1px solid #1e3a8a;
-    }
-    .badge.flag { background:#fef3c7; color:#92400e; border:1px solid #f59e0b; margin-left:0; margin-right:6px; }
-    /* Delete button */
-    .pinBtn { cursor:pointer; background:none; border:none; padding:2px 6px; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
-    .pinBtn svg{ width:18px; height:18px; stroke:#666; fill:none; stroke-width:1.8; transition:all 140ms ease; }
-    .pinBtn:focus-visible{ outline:2px solid #60a5fa; border-radius:4px; }
-
-    /* Debug chip */
-    .debugChip { margin-left: 8px; color:#666; font-size:0.85rem; }
-
-    /* Poll mode layout */
-    #dashView.mode-poll #listView { display: none !important; }
-    #dashView.mode-poll #confidencePanel { margin-top: 0; }
-
-    /* Peer feedback text wrapping */
-    .peerFbItem { white-space: pre-wrap; }
-    /* Review quality tags (per review) */
-    .revTagRow {
-      margin-top: 6px;
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .revTagBtn {
-      padding: 3px 8px;
-      border: 1px solid var(--border, #ddd);
-      border-radius: 12px;
-      background: #f7f7f7;
-      cursor: pointer;
-      font-size: 12px;
-      line-height: 1.2;
-    }
-
-    .revTagBtn.selected {
-      background: var(--uoa-blue, #15538A);
-      color: #fff;
-      border-color: var(--uoa-blue, #15538A);
-    }
-  </style>
-</head>
-<body>
-
-  <!-- LOGIN VIEW -->
-  <div id="loginView">
-    <h2 style="margin:12px;">Instructor Dashboard</h2>
-    <div class="loginCard">
-      <form id="startForm" onsubmit="handleLoginAndStart(); return false;">
-        <!-- Instructor login -->
-        <div class="row">
-          <label style="min-width:160px;">Instructor ID</label>
-          <input id="inst" placeholder="e.g., cjon911" style="flex:1;" autocomplete="username">
-        </div>
-        <div class="row" style="margin-top:8px;">
-          <label style="min-width:160px;">Password</label>
-          <input id="instPw" type="password" placeholder="••••••••" style="flex:1;" autocomplete="current-password">
-        </div>
-
-        <!-- Session -->
-        <div class="row" style="margin-top:12px;">
-          <label style="min-width:160px;">Session ID</label>
-          <input id="newSessionId" placeholder="e.g., week_01_lec_02" style="flex:1;">
-        </div>
-        <div class="row" style="margin-top:8px;">
-          <label for="sessionDuration" style="min-width:160px;">Writing open for</label>
-          <input id="sessionDuration" type="number" min="1" max="1440" value="60" style="width:80px;">
-          <span>mins</span>
-        </div>
-
-        <div style="margin-top:12px;">
-          <button id="startBtn" type="submit" class="btn btn-view" aria-label="Start session" title="Start session">🔓<span class="btn-label">Open</span></button>
-          <span id="startMsg" style="margin-left:10px;color:#0a7;"></span>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- DASHBOARD VIEW -->
-  <div id="dashView" style="display:none;">
-    <header>
-      <span><b>Session:</b> <span id="sessionLabel">—</span></span>
-      <label style="margin-left:12px;">Status: <span id="refreshStatus">Inactive</span></label>
-      <button class="btn btn-view" onclick="loadResponses()">
-        🔄 Refresh
-        </button>
-      <!-- View toggles -->
-      <span class="view-toggle">
-        <button type="button" class="btn btn-view" onclick="setViewCards()" aria-label="Card view" title="Card view">
-          📝 <span class="btn-label">Writing</span>
-        </button>
-        <button type="button" class="btn btn-view" onclick="setViewPoll()" aria-label="Poll view" title="Poll view">
-          📊 <span class="btn-label">Poll</span>
-        </button>
-      </span>
-
-      <span style="margin-left:12px;">
-        <label for="historyMins" style="margin-right:6px;">Show last</label>
-        <input id="historyMins" type="number" min="0" value="5" style="width:80px;" oninput="setHistoryWindow()" />
-        <span>mins</span>
-      </span>
-
-      <!-- Peer review controls -->
-      <span style="margin-left:12px;">
-        <button type="button" class="btn btn-view" onclick="openPeerReview()" aria-label="Peer review" title="Peer review">👥<span class="btn-label">Peer review</span></button>
-        <label for="peerK" style="margin-right:6px;">Reviews per student</label>
-        <input id="peerK" type="number" min="1" value="1" style="width:64px;">
-        <label for="peerUntil" style="margin:0 6px 0 8px;" title="Optional. Students can submit reviews until this time, even after the session ends. Leave blank for no deadline.">Reviews close</label>
-        <input id="peerUntil" type="datetime-local" onchange="peerDeadlineChanged()" title="Optional. Leave blank for no deadline.">
-        <button type="button" class="btn btn-view" onclick="closeReviewsNow()" aria-label="Close reviews now" title="Stop accepting reviews now (received reviews stay visible)">🔒<span class="btn-label">Close reviews</span></button>
-        <button type="button" class="btn btn-view" onclick="backToWriting()" aria-label="Back to writing" title="End peer review and reopen writing">✏️<span class="btn-label">Back to writing</span></button>
-        <span id="peerStatus" class="debugChip"></span>
-      </span>
-
-      <span style="margin-left:12px;">
-        <span id="writingState" class="debugChip"></span>
-        <button type="button" class="btn btn-view" onclick="extendWriting(30)" aria-label="Extend writing 30 minutes" title="Keep writing open for 30 more minutes (reopens it if stopped or expired)">⏱<span class="btn-label">+30 min</span></button>
-        <button type="button" class="btn btn-stop" onclick="stopSession()" aria-label="Stop session" title="Close writing now. Peer review continues until its deadline.">⏹<span class="btn-label">Stop session</span></button>
-      </span>
-
-    </header>
-    
-    <!-- Poll (first-word tally) -->
-    <div id="pollPanel" class="list" style="padding:12px; border-top:1px solid #eee; display:none;">
-      <div class="panelTitle">Poll results</div>
-      <canvas id="pollChart" width="600" height="240" style="max-width:100%;"></canvas>
-    </div>
-
-    <!-- Board for responses -->
-    <div id="listView" class="list board"></div>
-
-    <!-- Confidence bar chart -->
-    <div id="confidencePanel" class="list" style="display:none;padding:12px; border-top:1px solid #eee;">
-      <div class="panelTitle">Class confidence level</div>
-      <canvas id="confidenceChart" width="600" height="240" style="max-width: 100%;"></canvas>
-    </div>
-  </div>
-
+  <!-- dashboard_core: login, session state, response cards, tags and charts -->
   <script>
     // --- State ---
     let INSTRUCTOR_ID = '';
     let AUTH_TOKEN = ''; // issued by apiInstructorLogin; required by every instructor API call
     let SESSION_STATE = null; // latest apiGetSessionState result for currentSessionId
+    let ACTIVITY_NOTE = '';   // shown next to the activity label, e.g. when settings were kept
     let currentSessionId = '';
-
     let RESPONSES = [];
     let CURRENT_PHASE = 'writing';
-
     let HISTORY_WINDOW_MINS = 5; // local filter only
-
     // View mode: 'cards' (default) or 'poll'
     let DASH_VIEW_MODE = 'cards';
-
     // Per-row local write timestamps, so a Refresh doesn't revert a fresher local edit
     const TAG_WRITE_TS = Object.create(null); // { response_id: unix_ms_of_local_tag_write }
     const POS_WRITE_TS = Object.create(null); // { response_id: unix_ms_of_local_pos_write }
     const COLLAPSE_STATE = {}; // tags area open/closed per response
     const REVIEWS_COLLAPSE_STATE = Object.create(null); // { [response_id]: true=open, false/undefined=closed }
-
     // Batched peer feedback cache keyed by response_id
     let FEEDBACK_BY_RESPONSE = {}; // { [response_id]: { count, items:[{text,timestamp}] } }
     // Local override cache for review quality, to prevent UI from reverting on refresh
     // Shape: { [response_id]: { [feedback_key]: { quality: string, ts: number } } }
     const LOCAL_REVIEW_QUALITY = Object.create(null);
-
     function setViewPoll(){
       DASH_VIEW_MODE = 'poll';
       const dashView = document.getElementById('dashView');
@@ -289,7 +32,6 @@
       render();
       renderConfidence();
     }
-
     function setViewCards(){
       DASH_VIEW_MODE = 'cards';
       const dashView = document.getElementById('dashView');
@@ -301,13 +43,11 @@
       render();
       renderConfidence();
     }
-
     // Tag groups
     const PERFORMANCE_TAGS = ['Outstanding','Strong','Developing','Emerging','Incomplete'];
     const REASON_TAGS      = ['Insightful','Vague','Unclear','Off-topic','Inaccurate'];
     // Review quality scale (exclusive)
     const REVIEW_QUALITY = ['Unsatisfactory','Minimal','General','Constructive','Actionable'];
-
     function parseTags(str){ return new Set(String(str||'').split(',').map(s=>s.trim()).filter(Boolean)); }
     function stringifyTags(set){ return Array.from(set).join(','); }
     function inAppsScript(){ return !!(window.google && google.script && google.script.run); }
@@ -315,18 +55,15 @@
       s = String(s || '');
       return s.replace(/[&<>"']/g, (m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])));
     }
-
     // Shown when profanity_action is "flag" and the text contained a listed term
     function flagBadgeHTML(flagged){
       return flagged ? '<span class="badge flag" title="Contains a term from ProfanityList">⚠ Flagged</span> ' : '';
     }
-
     function confidenceBadgeHTML(conf){
       const n = Number(conf || 0);
       if (!n || n < 1 || n > 5) return '';
       return `<span class="badge c${n}" title="Confidence">Confidence: ${n}</span>`;
     }
-
     // Robust timestamp handling
     function toDate(val){
       if (!val) return null;
@@ -346,7 +83,6 @@
       const now = new Date();
       return (now - ts) <= windowMs;
     }
-
     // Helper to pick server-side "updated timestamp"
     function getRowUpdatedTs(row){
       // Prefer tags_updated_at, then updated_at, then timestamp; all optional
@@ -356,7 +92,6 @@
         toDate(row && row.timestamp);
       return d || null;
     }
-
     // --- Start + Login ---
     function handleLoginAndStart() {
       const btn = document.getElementById('startBtn');
@@ -368,6 +103,8 @@
       const pw = document.getElementById('instPw').value || ''; // not trimmed: spaces may be part of the password
       const sessionId = (document.getElementById('newSessionId').value || '').trim();
       const duration_mins = Math.min(1440, Math.max(1, parseInt(document.getElementById('sessionDuration').value, 10) || 60));
+      const presetEl = document.querySelector('input[name="preset"]:checked');
+      const preset = presetEl ? presetEl.value : 'respond';
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
       if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
@@ -382,6 +119,10 @@
                   INSTRUCTOR_ID = loginRes.instructor_id || inst;
                   currentSessionId = sessionId;
                   HISTORY_WINDOW_MINS = 5;
+                  // A session that's mid-review keeps its activity type; say so
+                  ACTIVITY_NOTE = startRes.settings_kept
+                    ? 'kept: this session is in peer review. Use "Back to writing" to change it.'
+                    : '';
 
                   showDashboard(inst, sessionId);
                   msg.style.color = '#0a7';
@@ -398,7 +139,7 @@
                 msg.textContent = 'Start failed: ' + (err && err.message ? err.message : err);
                 btn.disabled = false;
               })
-              .apiStartSession(AUTH_TOKEN, sessionId, duration_mins);
+              .apiStartSession(AUTH_TOKEN, sessionId, duration_mins, preset);
           } else {
             msg.style.color = '#c00';
             msg.textContent = (loginRes && loginRes.error) || 'Invalid login.';
@@ -412,7 +153,6 @@
         })
         .apiInstructorLogin(inst, pw);
     }
-
     function showDashboard(inst, sessionId) {
       document.getElementById('loginView').style.display = 'none';
       const dashView = document.getElementById('dashView');
@@ -422,62 +162,11 @@
 
       render();
     }
-    
     function setHistoryWindow(){
       const val = Number(document.getElementById('historyMins').value || 5);
       HISTORY_WINDOW_MINS = isNaN(val) ? 5 : Math.max(0, val);
       render();            // re-render cards with new window
       renderConfidence();  // update the confidence chart
-    }
-    
-    function openPeerReview(){
-      // Basic guards
-      if (!INSTRUCTOR_ID || !currentSessionId) {
-        alert('Missing instructor or session. Start a session first.');
-        return;
-      }
-      // Reviews per student
-      const kInput = document.getElementById('peerK');
-      const k = Math.max(1, Number(kInput ? kInput.value : 1) || 1);
-      const statusEl = document.getElementById('peerStatus');
-      const peerUntilIso = getPeerUntilIso();
-      if (peerUntilIso && new Date(peerUntilIso) <= new Date()) {
-        alert('The review deadline must be in the future (or leave it blank for no deadline).');
-        return;
-      }
-
-      if (statusEl) statusEl.textContent = 'Opening...';
-
-      // Call the server to open peer review for this session
-      google.script.run
-        .withSuccessHandler(res => {
-          if (!res || !res.ok) {
-            if (statusEl) statusEl.textContent = (res && res.error) ? ('Error: ' + res.error) : 'Failed to open';
-            return;
-          }
-          // Reflect locally that we've switched to review, then pull the authoritative state
-          CURRENT_PHASE = 'review';
-          refreshSessionState();
-        })
-        .withFailureHandler(err => {
-          if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
-        })
-        .apiStartPeerReview(AUTH_TOKEN, currentSessionId, k, peerUntilIso);
-    }
-
-    // --- Review deadline helpers ---
-    // datetime-local values are in the browser's local time; convert to/from ISO (UTC)
-    function getPeerUntilIso(){
-      const v = (document.getElementById('peerUntil').value || '').trim();
-      if (!v) return '';
-      const d = new Date(v);
-      return isNaN(d.getTime()) ? '' : d.toISOString();
-    }
-    function toLocalInputValue(iso){
-      const d = iso ? new Date(iso) : null;
-      if (!d || isNaN(d.getTime())) return '';
-      const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
     function fmtWhen(iso){
       const d = iso ? new Date(iso) : null;
@@ -487,35 +176,6 @@
         ? d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
         : d.toLocaleString([], { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
     }
-
-    // Changing the deadline while peer review is open saves it immediately
-    function peerDeadlineChanged(){
-      if (!SESSION_STATE || !SESSION_STATE.peer_open) return; // used when peer review is opened
-      const iso = getPeerUntilIso();
-      if (iso && new Date(iso) <= new Date()) {
-        alert('The review deadline must be in the future. Use "Close reviews" to close them now.');
-        refreshSessionState();
-        return;
-      }
-      google.script.run
-        .withSuccessHandler(() => refreshSessionState())
-        .withFailureHandler(err => {
-          alert('Could not change deadline: ' + (err && err.message ? err.message : err));
-          refreshSessionState();
-        })
-        .apiSetPeerDeadline(AUTH_TOKEN, currentSessionId, iso);
-    }
-
-    function closeReviewsNow(){
-      if (!currentSessionId) return;
-      if (!SESSION_STATE || !SESSION_STATE.peer_open) { alert('Peer review is not open.'); return; }
-      if (!confirm('Stop accepting peer reviews now? Students (and you) can still read reviews already submitted.')) return;
-      google.script.run
-        .withSuccessHandler(() => refreshSessionState())
-        .withFailureHandler(err => alert('Could not close reviews: ' + (err && err.message ? err.message : err)))
-        .apiCloseReviews(AUTH_TOKEN, currentSessionId);
-    }
-
     function extendWriting(mins){
       if (!currentSessionId) return;
       google.script.run
@@ -523,7 +183,6 @@
         .withFailureHandler(err => alert('Could not extend: ' + (err && err.message ? err.message : err)))
         .apiExtendSession(AUTH_TOKEN, currentSessionId, mins);
     }
-
     // Fetch the state of the session on screen and update phase + status chips
     function refreshSessionState(){
       if (!AUTH_TOKEN || !currentSessionId) return;
@@ -544,10 +203,17 @@
         })
         .apiGetSessionState(AUTH_TOKEN, currentSessionId);
     }
-
     function renderSessionState(){
       const st = SESSION_STATE;
       if (!st) return;
+      // Activity type: label in the header; peer review controls only when it's enabled
+      const settings = st.settings || { label: '', peer_review: false };
+      const actEl = document.getElementById('activityLabel');
+      if (actEl) {
+        actEl.textContent = settings.label + (ACTIVITY_NOTE ? ' (' + ACTIVITY_NOTE + ')' : '');
+      }
+      const peerControls = document.getElementById('peerControls');
+      if (peerControls) peerControls.style.display = settings.peer_review ? '' : 'none';
       const writingEl = document.getElementById('writingState');
       if (writingEl) {
         writingEl.textContent = !st.writing_open ? 'Writing closed'
@@ -565,25 +231,6 @@
         input.value = toLocalInputValue(st.peer_until);
       }
     }
-
-    // Close peer review and return the session to the writing phase
-    function backToWriting(){
-      if (!INSTRUCTOR_ID || !currentSessionId) return;
-      if (!confirm('End peer review and reopen writing? Students can no longer submit or read reviews for this session. Students need to reload their page to see the change.')) return;
-      const statusEl = document.getElementById('peerStatus');
-      if (statusEl) statusEl.textContent = 'Closing...';
-      google.script.run
-        .withSuccessHandler(() => {
-          CURRENT_PHASE = 'writing';
-          render();
-          refreshSessionState();
-        })
-        .withFailureHandler(err => {
-          if (statusEl) statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
-        })
-        .apiSetPhase(AUTH_TOKEN, currentSessionId, 'writing');
-    }
-
     // Stop the session: closes writing now. Peer review (if open) continues until its deadline.
     function stopSession(){
       if (!INSTRUCTOR_ID || !currentSessionId) return;
@@ -598,7 +245,6 @@
         })
         .apiStopSession(AUTH_TOKEN, currentSessionId);
     }
-
     // --- Load responses (on login and when Refresh is clicked) ---
     function loadResponses(){
       document.getElementById('refreshStatus').textContent =
@@ -681,7 +327,6 @@
         })
         .apiListResponsesByInstructor(AUTH_TOKEN, currentSessionId);
     }
-
     // --- Render (cards with tags, delete, drag) ---
     function render(){
       
@@ -946,7 +591,6 @@
         listView.appendChild(card);
       });
     }
-
     // --- Tagging (exclusive per group) ---
     function resyncCardTagsUI(cardEl, tagsStr) {
       const tagsArray = String(tagsStr || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -968,7 +612,6 @@
       const summary = cardEl.querySelector('.tagRow .tagSummary');
       if (summary) summary.textContent = 'Indicators: ' + (tagsStr || '');
     }
-
     window.addTagExclusive = function(responseId, group, tag, btnEl){
       const r = RESPONSES.find(x => String(x.response_id) === String(responseId));
       if (!r) return;
@@ -1012,41 +655,6 @@
         })
         .apiUpdateResponse(AUTH_TOKEN, responseId, { tags: next });
     };
-
-    // Persist the quality tag for a specific review item
-    window.setReviewQuality = function(responseId, feedbackKey, quality, btnEl) {
-      // 1) Optimistic UI update: mark selected in this button group
-      const row = btnEl && btnEl.closest('.revTagRow');
-      if (row) {
-        row.querySelectorAll('.revTagBtn').forEach(b => {
-          const q = b.getAttribute('data-q') || '';
-          b.classList.toggle('selected', q === quality);
-        });
-      }
-
-      // 2) Update local cache so selection survives re-render until next batch refresh
-      const rid = String(responseId);
-      const fbObj = FEEDBACK_BY_RESPONSE[rid];
-      if (fbObj && Array.isArray(fbObj.items)) {
-        const it = fbObj.items.find(x => String((x && (x.id ?? x.timestamp))) === String(feedbackKey));
-        if (it) it.quality = quality;
-      }
-
-      // Record/refresh the local override with a timestamp
-      if (!LOCAL_REVIEW_QUALITY[rid]) LOCAL_REVIEW_QUALITY[rid] = Object.create(null);
-      LOCAL_REVIEW_QUALITY[rid][String(feedbackKey)] = { quality: String(quality || ''), ts: Date.now() };
-
-      // 3) Persist to server (optional no-op if not in Apps Script context)
-      if (inAppsScript()) {
-        google.script.run
-          .withSuccessHandler(() => { /* saved */ })
-          .withFailureHandler(err => {
-            alert('Save review tag failed: ' + (err && err.message ? err.message : err));
-          })
-          .apiUpdateFeedbackQuality(AUTH_TOKEN, currentSessionId, responseId, feedbackKey, quality);
-      }
-    };
-
     // --- Delete outline & handler ---
     function deleteOutlineSVG(){
       return `
@@ -1073,7 +681,6 @@
           .apiUpdateResponse(AUTH_TOKEN, responseId, { is_hidden: 'TRUE' });
       });
     }
-
     // --- Save edit & position ---
     // Save an instructor edit when the card loses focus, but only if the text changed
     function saveEdit(id, text){
@@ -1095,7 +702,6 @@
         })
         .apiUpdateResponse(AUTH_TOKEN, id, { pos_x: x, pos_y: y });
     }
-
     // --- Confidence chart (proper bars) ---
     function renderConfidence() {
       const panel = document.getElementById('confidencePanel');
@@ -1120,7 +726,6 @@
 
       drawConfidenceChart(canvas, counts);
     }
-
     // --- Poll bar chart ---
     function renderPollChart(canvas, countsObj){
       if (!canvas) return;
@@ -1184,7 +789,6 @@
         ctx.fillText(String(keys[i]), x+bw/2, pad.top+H+6);
       }
     }
-
     function drawConfidenceChart(canvas, counts){
       const dpr = window.devicePixelRatio || 1;
       const cssW = canvas.clientWidth || canvas.width;
@@ -1235,7 +839,6 @@
         ctx.fillText(String(i+1), x + bw/2, pad.top + H + 6);
       }
     }
-
     // Responsive columns on resize (grid items)
     window.addEventListener('resize', ()=>{
       const listView = document.getElementById('listView');
@@ -1247,5 +850,3 @@
       listView.style.setProperty('--cols', cols);
     });
   </script>
-</body>
-</html>

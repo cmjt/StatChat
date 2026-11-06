@@ -1,0 +1,291 @@
+  <!-- student_core: session resolution, phase UI and text responses -->
+  <script>
+    // --- State ---
+    let INSTRUCTOR_ID = '';
+    let SESSION_ID = '';
+    let CURRENT_PHASE = 'writing';
+    let REVIEWS_OPEN = false;  // peer review accepting submissions (before its deadline)
+    let PEER_UNTIL = '';       // review deadline (ISO) or '' for none
+    let WRITING_OPEN = false;  // the session is accepting responses
+    let SETTINGS = null;       // activity settings: { submission_type, peer_review, preset, label }
+    const SERVER_INST = '<?= inst ?>';
+    // Peer review UI state, rebuilt whenever the session or review state changes
+    let ASSIGNMENTS_LOADED = false;
+    let ASSIGNMENTS_LOADING_GEN = -1;
+    let ASSIGNED_IDS = [];
+
+    // The page follows the instructor: it re-checks the session state every 20-30 seconds
+    // (randomised so a class's requests are spread out; the server also caches the answer
+    // briefly), pauses while the tab is hidden, and checks at once when it's shown again.
+    const POLL_BASE_MS = 20000, POLL_JITTER_MS = 10000, POLL_RETRY_MS = 60000;
+    let POLL_TIMER = null, POLL_IN_FLIGHT = false;
+    let VIEW_SIG = '';   // signature of the last applied state, to detect changes
+    let VIEW_GEN = 0;    // bumped when session/review state changes; stale async replies are ignored
+    // Anonymous per-browser ID. If storage is blocked, fall back to a per-page-load ID
+    // (the student then can't come back later to see their feedback).
+    let REVIEWER_TOKEN = '';
+    try { REVIEWER_TOKEN = localStorage.getItem('reviewer_token') || ''; } catch (e) {}
+    if (!REVIEWER_TOKEN) {
+      REVIEWER_TOKEN = Date.now().toString(36) + Math.random().toString(36).substring(2);
+      try { localStorage.setItem('reviewer_token', REVIEWER_TOKEN); } catch (e) {}
+    }
+    function normalizeSearch(raw){
+      return String(raw || '').replace(/&amp;amp;amp;amp;/g, '&');
+    }
+    function getParam(name){
+      const params = new URLSearchParams(normalizeSearch(location.search));
+      return params.get(name);
+    }
+    function inAppsScript(){ return !!(window.google && google.script && google.script.run); }
+    function setStatus(msg, isError=false){
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status ' + (isError ? 'err' : 'ok');
+    }
+    // Escape user-supplied text before inserting it with innerHTML
+    function escapeHtml(s){
+      return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+    function countWords(s){
+      return String(s||'').trim().split(/\s+/).filter(Boolean).length;
+    }
+    document.getElementById('responseText').addEventListener('input', () => {
+      document.getElementById('wordCount').textContent =
+        `Words: ${countWords(document.getElementById('responseText').value)}`;
+    });
+    function formatDeadline(iso){
+      const d = iso ? new Date(iso) : null;
+      if (!d || isNaN(d.getTime())) return '';
+      return d.toLocaleString([], { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+    }
+    function showToast(msg){
+      const el = document.getElementById('phaseToast');
+      if (!el) return;
+      el.textContent = msg;
+      el.style.display = msg ? 'block' : 'none';
+    }
+
+    /** Apply a state from apiGetStudentView. Does nothing if nothing changed, so polling
+     *  never disturbs what the student is doing; a draft in the text box is always kept. */
+    function applyView(res){
+      const v = (res && res.ok && res.session_id) ? res : null;
+      const st = v && v.settings ? v.settings : null;
+      const sig = v
+        ? [v.session_id, v.phase, v.writing_open, v.reviews_open, v.peer_until, st && st.submission_type, st && st.peer_review].join('|')
+        : 'none';
+      if (sig === VIEW_SIG) return;
+      const first = VIEW_SIG === '';
+      const prev = { sid: SESSION_ID, phase: CURRENT_PHASE, open: REVIEWS_OPEN, writing: WRITING_OPEN };
+      VIEW_SIG = sig;
+
+      if (v) {
+        SESSION_ID   = v.session_id;
+        CURRENT_PHASE = (v.phase === 'review') ? 'review' : 'writing';
+        WRITING_OPEN = !!v.writing_open;
+        REVIEWS_OPEN = !!v.reviews_open;
+        PEER_UNTIL   = v.peer_until || '';
+        SETTINGS     = st || { submission_type: 'text', peer_review: CURRENT_PHASE === 'review', preset: '', label: '' };
+      } else {
+        SESSION_ID = ''; CURRENT_PHASE = ''; WRITING_OPEN = false; REVIEWS_OPEN = false; PEER_UNTIL = ''; SETTINGS = null;
+      }
+
+      // New session, or review opened/closed: discard peer review UI built for the old state
+      if (SESSION_ID !== prev.sid || CURRENT_PHASE !== prev.phase || REVIEWS_OPEN !== prev.open) {
+        VIEW_GEN++;
+        ASSIGNMENTS_LOADED = false;
+        ASSIGNED_IDS = [];
+        document.getElementById('assignments').innerHTML = '';
+        document.getElementById('myFeedback').innerHTML = '';
+        setStatus('');
+      }
+
+      // Tell the student what changed (not on first load)
+      if (!first) {
+        if (!SESSION_ID) showToast('This activity has ended.');
+        else if (SESSION_ID !== prev.sid) showToast('A new activity has started: ' + (SETTINGS.label || 'activity') + '.');
+        else if (CURRENT_PHASE === 'review' && prev.phase !== 'review') showToast('Peer review is now open.');
+        else if (CURRENT_PHASE === 'review' && prev.open && !REVIEWS_OPEN) showToast('Peer review has closed.');
+        else if (CURRENT_PHASE === 'writing' && prev.phase === 'review') showToast('Writing is open again.');
+        else if (WRITING_OPEN !== prev.writing) showToast(WRITING_OPEN ? 'Writing is open again.' : 'Writing has closed.');
+      } else if (CURRENT_PHASE === 'review') {
+        showToast(REVIEWS_OPEN ? 'Peer review is open.' : 'Peer review has closed.');
+      }
+
+      renderBanner();
+      applyPhaseUI();
+    }
+
+    function renderBanner(){
+      document.getElementById('sessionLabel').textContent = SESSION_ID || '—';
+      document.getElementById('activityLabel').textContent = (SETTINGS && SETTINGS.label) || '—';
+      document.getElementById('sessionStatus').textContent =
+        !SESSION_ID ? 'No active session'
+        : CURRENT_PHASE === 'review' ? (REVIEWS_OPEN ? 'Peer review' : 'Peer review closed')
+        : (WRITING_OPEN ? 'Open' : 'Closed');
+    }
+
+    function applyPhaseUI(){
+      const textEl = document.getElementById('responseText');
+      const submitBtn = document.getElementById('submitBtn');
+      const reviewEl = document.getElementById('reviewPanel');
+      const deadlineEl = document.getElementById('reviewDeadline');
+      const feedbackPanel = document.getElementById('myFeedbackPanel');
+      const noteEl = document.getElementById('modeNote');
+      const setNote = (txt) => { noteEl.textContent = txt; noteEl.style.display = txt ? 'block' : 'none'; };
+
+      if (!SESSION_ID) {
+        textEl.placeholder = 'No activity is open right now. This page updates automatically when your instructor starts one.';
+        textEl.disabled = true;
+        submitBtn.disabled = true;
+        reviewEl.style.display = 'none';
+        if (feedbackPanel) feedbackPanel.style.display = 'none';
+        setNote('');
+        return;
+      }
+
+      if (CURRENT_PHASE === 'review') {
+        textEl.placeholder = REVIEWS_OPEN
+          ? 'Peer review is active. Writing is temporarily disabled.'
+          : 'This session has ended. Writing is closed.';
+        submitBtn.disabled = true;
+        textEl.disabled = true;
+        reviewEl.style.display = 'block';
+        setNote('');
+        if (feedbackPanel && !ASSIGNMENTS_LOADED) feedbackPanel.style.display = 'none';
+
+        const when = formatDeadline(PEER_UNTIL);
+        if (deadlineEl) {
+          deadlineEl.textContent = REVIEWS_OPEN
+            ? (when ? `Reviews can be submitted until ${when}.` : '')
+            : `Peer review has closed${when ? ' (' + when + ')' : ''}. You can still read feedback you received if you completed your reviews.`;
+        }
+        maybeLoadAssignments();
+      } else { // writing
+        textEl.placeholder = WRITING_OPEN ? 'Write your answer…' : 'Writing is closed.';
+        submitBtn.disabled = !WRITING_OPEN;
+        textEl.disabled = !WRITING_OPEN;
+        reviewEl.style.display = 'none';
+        if (feedbackPanel) feedbackPanel.style.display = 'none';
+        setNote(SETTINGS && SETTINGS.peer_review
+          ? "This activity includes peer review: after writing, you'll review classmates' responses and get feedback on yours."
+          : '');
+      }
+    }
+
+    function scheduleNextPoll(ms){
+      clearTimeout(POLL_TIMER);
+      POLL_TIMER = setTimeout(pollView, ms);
+    }
+    function pollView(){
+      if (document.hidden) return;          // resumed by the visibilitychange listener
+      if (POLL_IN_FLIGHT) return;
+      POLL_IN_FLIGHT = true;
+      google.script.run
+        .withSuccessHandler(res => {
+          POLL_IN_FLIGHT = false;
+          applyView(res);
+          scheduleNextPoll(POLL_BASE_MS + Math.random() * POLL_JITTER_MS);
+        })
+        .withFailureHandler(err => {
+          POLL_IN_FLIGHT = false;
+          if (!VIEW_SIG) {                    // only surface errors before the first successful load
+            document.getElementById('sessionStatus').textContent = 'Error';
+            setStatus(String(err && err.message ? err.message : err), true);
+          }
+          scheduleNextPoll(POLL_RETRY_MS);
+        })
+        .apiGetStudentView(INSTRUCTOR_ID);
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleNextPoll(300); });
+
+    /** Called once from student.html after all scripts have loaded */
+    function init(){
+      INSTRUCTOR_ID = (getParam('inst') || SERVER_INST || '').trim();
+      document.getElementById('instLabel').textContent = INSTRUCTOR_ID || '—';
+
+      if (!INSTRUCTOR_ID) {
+        document.getElementById('sessionStatus').textContent = 'Error';
+        setStatus('Missing ?inst=... (instructor id). Use the official link.', true);
+        return;
+      }
+      if (!inAppsScript()) {
+        document.getElementById('sessionStatus').textContent = 'Error';
+        setStatus('Please open the official web app link (Apps Script HtmlService).', true);
+        return;
+      }
+      document.getElementById('sessionStatus').textContent = 'Resolving…';
+      pollView();
+    }
+
+    const toggleBtn = document.getElementById('toggleBtn');
+    const collapsible = document.getElementById('collapsible');
+    toggleBtn.addEventListener('click', () => {
+      if (collapsible.style.display === 'none') {
+        collapsible.style.display = 'block';
+        toggleBtn.textContent = '−'; // change + to −
+      } else {
+        collapsible.style.display = 'none';
+        toggleBtn.textContent = '+'; // change − back to +
+      }
+    });
+    document.querySelectorAll('.conf-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = Number(btn.dataset.value);
+        // Update hidden input so workflow still works
+        document.getElementById('confidence').value = val;
+        document.getElementById('confVal').textContent = val === 0 ? "N/A" : val;
+        document.querySelectorAll('.conf-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+    function submittedMessage(){
+      return (SETTINGS && SETTINGS.peer_review)
+        ? 'Submitted. Thank you! Peer review will appear here when your instructor opens it.'
+        : 'Submitted. Thank you!';
+    }
+    function submitResponse(){
+      const reviewerToken = REVIEWER_TOKEN;
+      const text     = document.getElementById('responseText').value.trim();
+      const conf     = Number(document.getElementById('confidence').value);
+
+      if (CURRENT_PHASE === 'review') { setStatus('Writing is disabled during peer review.', true); return; }
+      if (!WRITING_OPEN) { setStatus('Writing is closed for this activity.', true); return; }
+      if (!text)     { setStatus('Please enter a response.', true); return; }
+      if (!SESSION_ID) { setStatus('No active session. Please try again later.', true); return; }
+
+      setStatus('Submitting…');
+      document.getElementById('submitBtn').disabled = true;
+
+      const payload = { response_text_original: text, 
+      reviewer_token: reviewerToken, confidence: conf };
+
+      google.script.run
+        .withSuccessHandler(res=>{
+          if (res && res.ok) {
+            document.getElementById('responseText').value = '';
+            setStatus(submittedMessage(), false);
+          } else {
+            setStatus(res && res.error ? res.error : 'Submission failed.', true);
+          }
+          document.getElementById('submitBtn').disabled = !WRITING_OPEN;
+        })
+        .withFailureHandler(err=>{
+          google.script.run
+            .withSuccessHandler(res2=>{
+              if (res2 && res2.ok) {
+                document.getElementById('responseText').value = '';
+                setStatus(submittedMessage(), false);
+              } else {
+                setStatus(res2 && res2.error ? res2.error : 'Submission failed.', true);
+              }
+              document.getElementById('submitBtn').disabled = !WRITING_OPEN;
+            })
+            .withFailureHandler(err2=>{
+              setStatus(String(err2), true);
+              document.getElementById('submitBtn').disabled = !WRITING_OPEN;
+            })
+            .submitResponse(text, reviewerToken, '', SESSION_ID, INSTRUCTOR_ID, conf);
+        })
+        .apiSubmitResponse(SESSION_ID, payload);
+    }
+  </script>

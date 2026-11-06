@@ -1,0 +1,135 @@
+  <style>
+    body, button, input, select, textarea { font-family: 'Inter', sans-serif;}
+        :root {
+      --sta-blue: #00539b;
+      --sta-blue-hover: #007bc2;
+      --danger: #b42318;
+      --danger-hover: #8f1d14;
+      --border: #d0d5dd;
+      --text-light: #ffffff;
+    }
+
+    /* Layout */
+    .view-toggle {
+      margin-left: 12px;
+      display: inline-flex;
+      gap: 6px;
+    }
+
+    /* Base button */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.45rem 0.8rem;
+      font-size: 1.5rem;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      border-radius: 999px; /* pill shape */
+      border: 1px solid transparent;
+      cursor: pointer;
+      line-height: 1;
+      background: none;
+      transition: background-color 0.15s ease, transform 0.05s ease;
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn:focus-visible {
+      outline: 3px solid #84c5f4;
+      outline-offset: 2px;
+    }
+
+    /* View buttons */
+    .btn-view {
+      background-color: var(--sta-blue);
+      color: var(--text-light);
+    }
+    .btn-bot{
+      padding:2px 6px;
+      font-size:14px;
+    }
+    .btn-small{
+      padding:4px 8px;
+      font-size:12px;
+      min-height:auto;
+    }
+    .btn-view:hover {
+      background-color: var(--sta-blue-hover);
+    }
+    #toggleBtn {
+      cursor: pointer;
+      border: 1px solid #00539b; /* StA blue */
+      border-radius: 4px;
+      background-color: #ffffff;
+      color: #00539b;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    #toggleBtn:hover {
+      background-color: #00539b;
+      color: #ffffff;
+    }
+
+    #collapsible {
+      transition: all 0.2s ease;
+    }
+    :root { color-scheme: light dark; }
+    body { margin: 0; padding: 16px; }
+    .container { max-width: 720px; margin: 0 auto; }
+    h2 { margin: 0 0 12px; }
+    .banner { margin:12px 0; padding:8px 12px; border:3px solid #cbd5e1; border-radius:6px; background:#f8fafc;color: #475569;font-size: 0.9rem; }
+    .banner strong {font-weight: 600;color: #334155;}
+    @media (prefers-color-scheme: dark) {
+      .banner {background: #111827; border-left: 3px solid #374151; color: #9ca3af; }
+      .banner strong {color: #e5e7eb;}
+      }
+    .row { display:flex; gap:10px; align-items:center; }
+    label { font-weight: 600; }
+    input[type="text"], textarea, input[type="range"], button { padding:8px; font: inherit; }
+    input[type="text"] { width: 100%; }
+    textarea { width: 100%; min-height: 160px; resize: vertical; }
+    button { padding: 10px 14px; border: 1px solid #ccc; border-radius: 6px; background: #f0f0f0; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .small { color:#666; font-size: 0.92rem; }
+    .status { margin-left: 12px; color:#666; }
+    .countdown { font-weight:600; }
+    .ok { color: #0a7; }
+    .err { color: #c00; }
+    .card { border:1px solid #ddd; border-radius:8px; padding:12px; background:#fff; margin-top:8px; }
+     .conf-btn {
+      padding: 0.45rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #00539b; /* StoA blue */
+      background-color: #ffffff;
+      color: #00539b;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    /* Only fix box-sizing for the peer-review textareas inside assignment cards */
+    #assignments .card textarea {
+      box-sizing: border-box; /* ensures padding + border are included in the width */
+      width: 100%;
+      max-width: 100%;
+      display: block;
+      margin: 0;
+    }
+    /* Optional safety nets */
+    #assignments .card { overflow: hidden; }               /* prevent sub-pixel bleed */
+    #assignments .card .small { overflow-wrap: anywhere; } /* long words/URLs won’t push width */
+        .conf-btn:hover {
+          background-color: #00539b;
+          color: #ffffff;
+    }
+
+    .conf-btn.active {
+      background-color: #15538A;
+      color: #ffffff;
+    }
+    .toast { margin-top:8px; padding:8px 12px; border:1px solid #cfe9d8; background:#eaf7ef; color:#155d46; border-radius:6px; display:none; }
+    .completed { opacity: 0.6; }
+  </style>

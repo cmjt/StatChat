@@ -7,6 +7,103 @@ then (optionally) review each other's answers.
 - Student page: `<web app URL>?page=student&inst=<instructor_id>`
 - Instructor dashboard: `<web app URL>?page=dashboard`
 
+## Activities
+
+When opening a session, the instructor picks an activity:
+
+| Activity | Students submit | Peer review |
+|---|---|---|
+| **Quick response** | Short text answers or poll replies, shown live as cards and charts | Off: peer review controls are hidden |
+| **Peer review** | Text answers, then review classmates' answers | On: the instructor opens the review when ready |
+
+Behind the presets, each session stores two settings in Sessions:
+`submission_type` (`text` for now; `sketch` is planned) and `peer_review`
+(`TRUE`/`FALSE`). Both columns are added automatically. The server enforces
+them: peer review can't be opened in a quick-response session. Logging in again
+with a different activity changes it, except while the session is in peer
+review. Sessions created before activities existed behave as peer review
+sessions, as they did before.
+
+**Students' pages update themselves.** They re-check every 20–30 seconds
+(randomised so a class's requests are spread out), pause while the tab is
+hidden, and check at once when the tab is shown again. When the instructor
+starts or stops an activity, switches activity, opens or closes peer review, or
+returns to writing, students see it within about half a minute, with a short
+message saying what changed. Anything half-typed is kept. The server caches
+what students see for 10 seconds per instructor, and every instructor action
+clears that cache straight away.
+
+## Project layout
+
+```
+src/                  Everything deployed to Apps Script (clasp's rootDir)
+  Config.gs           Sheet names, locking, sheet/table helpers, settings
+  Auth.gs             Instructor login tokens, password hashing
+  Sessions.gs         Session lifecycle, activity presets, what students/dashboard see
+  Responses.gs        Student submissions, instructor moderation
+  PeerReview.gs       Peer review: assignment, submission, unlock, ratings
+  Profanity.gs        Profanity list, masking, detection
+  Web.gs              doGet/doPost and include() for HTML partials
+  student.html        Student page: markup, pulls in the partials below
+  student_styles.html / student_core.html / student_peer.html
+  dashboard.html      Instructor dashboard: markup, pulls in the partials below
+  dashboard_styles.html / dashboard_core.html / dashboard_peer.html
+tests/                Local tests (not deployed)
+```
+
+All `.gs` files share one global scope. Any top-level function whose name
+doesn't end in `_` can be called from the browser, so keep helpers private with
+a trailing `_`.
+
+## Deploying with clasp
+
+[clasp](https://github.com/google/clasp) syncs `src/` with the Apps Script
+project, so there's no copying and pasting in the editor.
+
+One-time setup:
+
+1. Install Node.js, then `npm install -g @google/clasp`.
+2. `clasp login`. This opens a browser to authorise your Google account.
+3. Enable the Apps Script API at <https://script.google.com/home/usersettings>.
+4. Copy `.clasp.json.example` to `.clasp.json` and paste in your script ID
+   (Apps Script editor → Project Settings → Script ID). `.clasp.json` is
+   git-ignored, so you can point it at a test copy of the project.
+5. Get the project's manifest so your deployment settings are kept: in the
+   editor, Project Settings → tick "Show appsscript.json manifest file". Copy
+   `appsscript.json` from the editor into `src/appsscript.json` and commit it.
+
+Each release:
+
+```bash
+python3 tests/run.py          # all tests must pass
+clasp push                    # replaces the project's files with src/
+clasp deploy -i <deploymentId> -d "what changed"
+```
+
+Use `clasp deployments` to find the ID of your existing web app deployment.
+Redeploying to the same ID keeps the web app URL that students use.
+`clasp push` deletes files that aren't in `src/`, which removes the old single
+`Code` file on the first push.
+
+## Running the tests
+
+```bash
+python3 tests/run.py
+```
+
+This needs Node.js or GNOME's `gjs`, but no Google account. It runs:
+
+- **A syntax check** of every `.gs` file and page script, plus all `.gs` files
+  together, so a name defined twice across files is caught.
+- **Server tests** (`tests/test_*.js`) against fake Sheets/Cache/Lock services
+  (`tests/harness.js`).
+- **Page tests** (files starting `// @page student` or `// @page dashboard`).
+  These run the real page scripts in a small fake browser
+  (`tests/page_harness.js`), with `google.script.run` calling the real server
+  code. `test_page_student.js` plays a whole class: the instructor starts,
+  stops and switches activities, and the student page is checked after each
+  poll.
+
 ## Session lifecycle
 
 Writing and peer review have separate time limits. Writing ends with the
@@ -58,8 +155,8 @@ What students see at the instructor's link:
    otherwise
 3. "No active session".
 
-The student page checks the session state once, when it loads. Students need to
-reload the page to see a phase change.
+The student page updates itself within about half a minute of any instructor
+change (see [Activities](#activities)).
 
 The dashboard's **Show last N mins** filter applies to response cards, not to
 reviews. When looking at a session after class, set it to `0` to show every
@@ -81,7 +178,7 @@ card.
   Apps Script editor, select `hashInstructorPasswords` in the function dropdown
   and click **Run**. It's safe to re-run. To add an instructor later, type their
   password in plaintext and run it again.
-- Any top-level function in `Code.gs` whose name doesn't end in `_` can be
+- Any top-level function in `src/*.gs` whose name doesn't end in `_` can be
   called from the browser via `google.script.run`. Keep internal helpers named
   with a trailing `_`, and make every instructor-only function start with
   `requireInstructor_(token)`.
@@ -112,6 +209,8 @@ Recommended columns (features that use them are skipped if they're missing):
 - peer_opened_at — needed for students to see a peer review after the session ends
 - peer_required_reviews
 - peer_until — review deadline (added automatically when peer review is opened)
+- submission_type — `text` (added automatically; see [Activities](#activities))
+- peer_review — `TRUE`/`FALSE` (added automatically)
 
 ---
 

@@ -1,0 +1,3 @@
+# clasp project pointer: each person/copy points at their own Apps Script project
+.clasp.json
+node_modules/
