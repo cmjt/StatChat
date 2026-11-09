@@ -77,7 +77,7 @@
                     const el = document.getElementById('snippet_' + rid);
                     if (!el) return;
                     if (res && res.ok && typeof res.text === 'string') {
-                      const body = escapeHtml(res.text) + mathBlockHTML(res.math);
+                      const body = escapeHtml(res.text) + mathBlockHTML(res.math) + sketchBlockHTML(res.sketch, 'a' + rid, res.math);
                       el.innerHTML = body || '<span class="small" style="color:#888;">(no text)</span>';
                     } else {
                       el.innerHTML = '<span class="small err">Text unavailable.</span>';
@@ -210,7 +210,7 @@
               border-radius:6px;
             ">
               <strong>Your response</strong><br>
-              ${escapeHtml(f.response_text)}${mathBlockHTML(f.response_math)}
+              ${escapeHtml(f.response_text)}${mathBlockHTML(f.response_math)}${sketchBlockHTML(f.response_sketch, 'f' + f.response_id, f.response_math)}
             </div>
             <strong>Peer feedback</strong><br>
             ${escapeHtml(f.feedback)}

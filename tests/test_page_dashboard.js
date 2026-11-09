@@ -11,13 +11,13 @@ setSheets({
   ProfanityList: [['badword']],
 });
 // The two login questions: what students submit, and whether there's peer review
-let chosen = { submissionType: 'text', peerReview: 'false' };
+let chosen = { submissionType: 'text', peerReview: 'false', sketchBackground: 'blank' };
 document.querySelector = sel => {
   const m = /^input\[name="(\w+)"\]:checked$/.exec(sel);
   return m && chosen[m[1]] !== undefined ? { value: chosen[m[1]] } : null;
 };
-function login(sessionId, preset, type) {
-  chosen = { submissionType: type || 'text', peerReview: preset === 'peer' ? 'true' : 'false' };
+function login(sessionId, preset, type, background) {
+  chosen = { submissionType: type || 'text', peerReview: preset === 'peer' ? 'true' : 'false', sketchBackground: background || 'blank' };
   el('inst').value = 'i1'; el('instPw').value = 'pw1'; el('newSessionId').value = sessionId; el('sessionDuration').value = '45';
   handleLoginAndStart();
 }
@@ -88,3 +88,25 @@ eq('revert: student\'s answer again, not marked', [RESPONSES[0].math, RESPONSES[
 
 login('maths2', 'peer', 'math');
 eq('math with peer review: label', el('activityLabel').textContent, 'Peer review · math');
+
+// Drawing: background question appears only for drawing types; drawings on cards; enlarge
+chosen.submissionType = 'sketch'; updateLoginOptions();
+eq('drawing chosen: background question shown', el('backgroundPicker').style.display, '');
+chosen.submissionType = 'math'; updateLoginOptions();
+eq('math chosen: background question hidden', el('backgroundPicker').style.display, 'none');
+login('draw1', 'respond', 'sketch', 'axes');
+eq('drawing: label and background', [el('activityLabel').textContent, SESSION_STATE.settings.background], ['Quick response · drawing', 'axes']);
+__SERVER.apiSubmitResponse('draw1', { sketch: { v: 1, bg: 'axes', s: [[0, 10, 10, 50, 50], [2, 300, 200]] }, reviewer_token: 's1' });
+loadResponses();
+const card = (el('listView').children.find(c => c.innerHTML.includes('sketchBlock')) || { innerHTML: '' }).innerHTML;
+eq('drawing card: drawing with both strokes, no text box', [(card.match(/<path d="M/g) || []).length >= 2, card.includes('sketchSvg'), card.includes('contenteditable')], [true, true, false]);
+const key = /openSketchModal\('(\w+)'\)/.exec(card)[1];
+openSketchModal(key);
+eq('click to enlarge: shown large', [el('sketchModal').style.display, el('sketchModal').innerHTML.includes('sketchSvg')], ['flex', true]);
+closeSketchModal();
+eq('close', el('sketchModal').style.display, 'none');
+login('both1', 'respond', 'math_sketch', 'grid');
+__SERVER.apiSubmitResponse('both1', { math: ['x=1'], sketch: { v: 1, bg: 'grid', s: [[1, 5, 5, 1, 1]] }, reviewer_token: 's1' });
+loadResponses();
+const both = RESPONSES.find(r => r.math.length && r.sketch);
+eq('math & drawing card: equations to correct, and the drawing', [!!both, el('listView').children.some(c => c.innerHTML.includes('mathSlot') && c.innerHTML.includes('sketchBlock'))], [true, true]);

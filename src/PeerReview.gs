@@ -12,7 +12,7 @@ function requiredReviews_(session) {
   return Math.max(1, parseInt(session && session.peer_required_reviews, 10) || DEFAULT_REVIEWS_PER_STUDENT);
 }
 
-/** Visible (not hidden) responses in a session, in sheet order: [{response_id, author, text, math}] */
+/** Visible (not hidden) responses in a session, in sheet order: [{response_id, author, text, math, sketch}] */
 function visibleResponses_(session_id) {
   const { header: hdr, rows } = readTable(getResponsesSheet());
   const idx = (name)=>{ const i = hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
@@ -23,7 +23,7 @@ function visibleResponses_(session_id) {
     .filter(r => sameId_(r[sCol], session_id) && String(r[hidCol] || 'FALSE').toLowerCase() !== 'true')
     .map(r => {
       const parts = responseParts_(r[txtECol], r[txtOCol], cCol >= 0 ? r[cCol] : '');
-      return { response_id: String(r[idCol] || ''), author: String(r[uidCol] || '').trim(), text: parts.text, math: parts.math };
+      return { response_id: String(r[idCol] || ''), author: String(r[uidCol] || '').trim(), text: parts.text, math: parts.math, sketch: parts.sketch };
     });
 }
 
@@ -497,6 +497,7 @@ function apiGetMyFeedback(session_id, reviewer_token) {
       response_id: String(r[rCol]),
       response_text: mine.get(String(r[rCol])).text,
       response_math: mine.get(String(r[rCol])).math,
+      response_sketch: mine.get(String(r[rCol])).sketch,
       feedback: String(r[tCol] || ''),
       timestamp: String(r[tsCol] || '')
     }));

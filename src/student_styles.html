@@ -66,6 +66,17 @@
     .mathRemove { border:1px solid var(--border); background:#fff; border-radius:6px; padding:6px 9px; cursor:pointer; color:#555; }
     .mathRemove:disabled { opacity:0.5; cursor:default; }
     #addMathBtn { margin-top:8px; font-size:0.95rem; }
+
+    /* Drawing pad (drawing activities) */
+    .sketchTools { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+    .sketchTool { border:1px solid var(--border); background:#fff; border-radius:8px; padding:6px 10px; min-height:38px; cursor:pointer; font-size:0.95rem; color:#111; }
+    .sketchTool.active { border-color:var(--sta-blue); box-shadow:0 0 0 2px var(--sta-blue) inset; }
+    .sketchTool:disabled { opacity:0.5; cursor:default; }
+    .sketchTool .swatch { display:inline-block; width:18px; height:18px; border-radius:50%; vertical-align:middle; }
+    .sketchPad { max-width:720px; }
+    .sketchPadSvg { touch-action:none; cursor:crosshair; -webkit-user-select:none; user-select:none; }
+    .sketchPadSvg.erasing { cursor:cell; }
+    .sketchPadSvg.disabled { opacity:0.6; cursor:default; }
     .btn-view:hover {
       background-color: var(--sta-blue-hover);
     }

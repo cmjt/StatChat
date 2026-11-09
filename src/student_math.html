@@ -6,14 +6,12 @@
     let MATH_FIELDS = [];               // [{ row, field, remove }]; field.value is the LaTeX
     let MATH_ENABLED = false;
 
-    function isMathActivity(){ return !!(SETTINGS && SETTINGS.submission_type === 'math'); }
+    function isMathActivity(){ return answerKind().math; }
     function setMathHelp(msg){ document.getElementById('mathHelp').textContent = msg; }
 
-    /** Math activities replace the text box with equation lines; called from applyPhaseUI */
+    /** Show or hide the equation lines; called from updateAnswerUI */
     function updateMathUI(canWrite){
-      const math = isMathActivity();
-      const show = !!SESSION_ID && CURRENT_PHASE !== 'review' && math;
-      document.getElementById('textSection').style.display = math ? 'none' : 'block';
+      const show = !!SESSION_ID && CURRENT_PHASE !== 'review' && isMathActivity();
       document.getElementById('mathSection').style.display = show ? 'block' : 'none';
       if (show) ensureMathEditor();
       setMathEnabled(show && canWrite);

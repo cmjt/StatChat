@@ -111,9 +111,11 @@
       const duration_mins = Math.min(1440, Math.max(1, parseInt(document.getElementById('sessionDuration').value, 10) || 60));
       const typeEl = document.querySelector('input[name="submissionType"]:checked');
       const peerEl = document.querySelector('input[name="peerReview"]:checked');
+      const bgEl = document.querySelector('input[name="sketchBackground"]:checked');
       const activity = {
         submission_type: typeEl ? typeEl.value : 'text',
         peer_review: !!(peerEl && peerEl.value === 'true'),
+        background: bgEl ? bgEl.value : 'blank',
       };
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
@@ -162,6 +164,12 @@
           btn.disabled = false;
         })
         .apiInstructorLogin(inst, pw);
+    }
+    /** Login form: the background choice only applies to drawing activities */
+    function updateLoginOptions(){
+      const typeEl = document.querySelector('input[name="submissionType"]:checked');
+      const drawing = !!typeEl && (typeEl.value === 'sketch' || typeEl.value === 'math_sketch');
+      document.getElementById('backgroundPicker').style.display = drawing ? '' : 'none';
     }
     function showDashboard(inst, sessionId) {
       document.getElementById('loginView').style.display = 'none';
@@ -466,10 +474,11 @@
             </span>
           </div>
 
-          ${(txt || !hasMath(r)) ? `<div contenteditable="true" onblur="saveEdit('${r.response_id}', this.textContent)">
+          ${(txt || (!hasMath(r) && !hasSketch(r.sketch))) ? `<div contenteditable="true" onblur="saveEdit('${r.response_id}', this.textContent)">
             ${escapeHtml(txt)}
           </div>` : ''}
           ${hasMath(r) ? '<div class="mathSlot"></div>' : ''}
+          ${sketchBlockHTML(r.sketch, 'r' + r.response_id, r.math)}
 
           <!-- Collapse toggle button -->
           <div style="margin-top:6px; display:flex; align-items:center; gap:4px;">

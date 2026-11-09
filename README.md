@@ -13,17 +13,19 @@ When opening a session, the instructor answers two questions:
 
 | Question | Choices |
 |---|---|
-| **Students submit** | **Text**: short written answers or poll replies. **Math**: typed equations only, with no text box |
+| **Students submit** | **Text**: short written answers or poll replies. **Math**: typed equations. **Drawing**: a sketch drawn with a finger, stylus or mouse. **Math & drawing**: equations and/or a drawing |
+| **Draw on** (drawing types only) | **Blank**, **Grid** or **Axes** |
 | **Peer review** | **Off**: responses are shown live as cards and charts, and peer review controls are hidden. **On**: after writing, students review classmates' answers when the instructor opens the review |
 
-The activity is named from the answers: *Quick response*, *Peer review*,
-*Quick response · math* or *Peer review · math*.
+The activity is named from the answers, e.g. *Quick response*, *Peer review ·
+math* or *Quick response · drawing*. Math and drawing activities have no text
+box.
 
-Each session stores the answers in two Sessions columns, `submission_type`
-(`text` or `math`; `sketch` is planned) and `peer_review` (`TRUE`/`FALSE`).
-Both columns are added automatically. The server enforces them: peer review
-can't be opened when it's off, a math activity accepts equations only, and a
-text activity accepts text only. Logging in again with different answers changes
+Each session stores the answers in Sessions columns `submission_type` (`text`,
+`math`, `sketch` or `math_sketch`), `peer_review` (`TRUE`/`FALSE`) and
+`sketch_background` (`blank`, `grid` or `axes`), all added automatically. The
+server enforces them: peer review can't be opened when it's off, and each
+activity accepts only its own kind of answer. Logging in again with different answers changes
 them, except while the session is in peer review. Sessions created before
 activities existed behave as text with peer review, as they did before.
 
@@ -53,10 +55,35 @@ to 10, which they can add or remove (for example, one step of working per line).
   any. `response_text_original` also gets a readable copy of the submission,
   with each equation as `$$...$$`.
 - **Poll view:** math answers are tallied by their last line (the final
-  answer), ignoring spaces.
+  answer), ignoring spaces. Drawings aren't tallied.
 - **Profanity:** equations can't be masked without breaking them, so a listed
   term inside one is blocked (with `profanity_action` = `block`) or otherwise
   flagged.
+
+### Drawing activities
+
+Students get a **drawing pad** on the background you chose (blank, grid, or
+first-quadrant axes for sketching distributions, scatterplots and curves).
+
+- **Tools:** black, blue and red pens, an eraser that removes whole lines,
+  Undo, and Clear (which Undo can bring back). It works with a finger, stylus
+  or mouse. Once a stylus is used, touches are ignored, so a palm resting on a
+  tablet doesn't draw.
+- **In class:** drawings appear on the dashboard cards straight away, like
+  written answers. Click a drawing to enlarge it, e.g. for the projector (Esc or
+  ✕ closes it). Students see drawings the same way in peer review.
+- **Math & drawing:** students get both the equation lines and the pad, and
+  can submit either or both. You can correct the equations as usual; drawings
+  can't be edited, but you can hide the card.
+- **Storage:** a drawing is stored as pen strokes, not an image, in the
+  `sketch` field of `response_content`:
+  `{"v": 1, "bg": "axes", "s": [[colour, x0, y0, dx1, dy1, ...], ...]}` on a
+  600 × 400 canvas. Each stroke is simplified as it's drawn, so a typical
+  sketch takes a few hundred to a few thousand characters. The limit is 30,000
+  characters (a Sheets cell holds 50,000); students are warned at 70% and can't
+  submit past 100%. `response_text_original` gets a note such as
+  `[drawing: 3 lines]`.
+- **Drawings can't be checked for profanity.** Hide anything inappropriate.
 
 **Students' pages update themselves.** They re-check every 20–30 seconds
 (randomised so a class's requests are spread out), pause while the tab is
@@ -79,10 +106,11 @@ src/                  Everything deployed to Apps Script (clasp's rootDir)
   Profanity.gs        Profanity list, masking, detection
   Web.gs              doGet/doPost and include() for HTML partials
   student.html        Student page: markup, pulls in the partials below
-  student_styles.html / student_core.html / student_math.html / student_peer.html
+  student_styles.html / student_core.html / student_math.html / student_sketch.html / student_peer.html
   dashboard.html      Instructor dashboard: markup, pulls in the partials below
   dashboard_styles.html / dashboard_core.html / dashboard_peer.html
   math_render.html    Shows equations (KaTeX) and loads the equation editor (MathLive); used by both pages
+  sketch.html         Drawings: stroke format, SVG display, enlarged view; used by both pages
 tests/                Local tests (not deployed)
 ```
 
@@ -244,8 +272,9 @@ Recommended columns (features that use them are skipped if they're missing):
 - peer_opened_at — needed for students to see a peer review after the session ends
 - peer_required_reviews
 - peer_until — review deadline (added automatically when peer review is opened)
-- submission_type — `text` (added automatically; see [Activities](#activities))
+- submission_type — `text`, `math`, `sketch` or `math_sketch` (added automatically; see [Activities](#activities))
 - peer_review — `TRUE`/`FALSE` (added automatically)
+- sketch_background — `blank`, `grid` or `axes` (added automatically)
 
 ---
 
@@ -271,7 +300,7 @@ Recommended columns:
 - is_pinned
 - profanity_flag — `NONE`, `MASKED` or `FLAGGED`
 - phase_at_submit
-- response_content — equations for math activities, and your corrections, as JSON (added automatically; see [Math activities](#math-activities))
+- response_content — equations, your corrections, and drawings, as JSON (added automatically; see [Math activities](#math-activities) and [Drawing activities](#drawing-activities))
 
 ---
 

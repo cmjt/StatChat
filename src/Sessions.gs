@@ -56,15 +56,19 @@ function parseDeadline_(iso) {
 }
 
 // ===== Activity settings =====
-// Each session has two settings, chosen at login:
-//   submission_type: what students submit: 'text', or 'math' (typed equations only)
+// Each session has these settings, chosen at login:
+//   submission_type: what students submit: 'text', 'math' (typed equations), 'sketch' (a
+//                    drawing) or 'math_sketch' (equations and/or a drawing)
 //   peer_review:     whether the session can have a peer review phase
-// The server only reasons about these two settings. PRESETS are the older single-choice
-// names, still accepted by apiStartSession.
+//   background:      what drawings are made on: 'blank', 'grid' or 'axes' (drawing types only)
+// PRESETS are the older single-choice names, still accepted by apiStartSession.
 const SUBMISSION_TYPES = {
-  text: { label_suffix: '' },
-  math: { label_suffix: ' · math' },
+  text:        { label_suffix: '',                   math: false, sketch: false },
+  math:        { label_suffix: ' · math',            math: true,  sketch: false },
+  sketch:      { label_suffix: ' · drawing',         math: false, sketch: true  },
+  math_sketch: { label_suffix: ' · math & drawing',  math: true,  sketch: true  },
 };
+const SKETCH_BACKGROUNDS = ['blank', 'grid', 'axes'];
 const PRESETS = {
   respond: { label: 'Quick response', submission_type: 'text', peer_review: false },
   peer:    { label: 'Peer review',    submission_type: 'text', peer_review: true  },
@@ -77,16 +81,18 @@ function activityLabel_(submission_type, peer_review) {
 }
 
 /** The activity chosen at login: a preset name ('respond' | 'peer') or
- *  { submission_type, peer_review }. Returns { submission_type, peer_review } or throws. */
+ *  { submission_type, peer_review, background }. Returns all three, or throws. */
 function resolveActivity_(activity) {
   if (activity && typeof activity === 'object') {
     const type = String(activity.submission_type || 'text').trim().toLowerCase();
     if (!SUBMISSION_TYPES[type]) throw new Error('Unknown submission type: ' + activity.submission_type);
-    return { submission_type: type, peer_review: prBool(activity.peer_review) };
+    const bg = String(activity.background || 'blank').trim().toLowerCase();
+    if (SKETCH_BACKGROUNDS.indexOf(bg) === -1) throw new Error('Unknown drawing background: ' + activity.background);
+    return { submission_type: type, peer_review: prBool(activity.peer_review), background: bg };
   }
   const key = String(activity || DEFAULT_PRESET).trim().toLowerCase();
   if (!PRESETS[key]) throw new Error('Unknown activity type: ' + activity);
-  return { submission_type: PRESETS[key].submission_type, peer_review: PRESETS[key].peer_review };
+  return { submission_type: PRESETS[key].submission_type, peer_review: PRESETS[key].peer_review, background: 'blank' };
 }
 
 /** A session's activity settings. Sessions created before settings existed have blank
@@ -96,8 +102,10 @@ function getSessionSettings_(session) {
   const type = String((session && session.submission_type) || '').trim().toLowerCase() || 'text';
   const rawPeer = session ? session.peer_review : '';
   const peer = (rawPeer === '' || rawPeer === undefined || rawPeer === null) ? true : prBool(rawPeer);
-  if (!SUBMISSION_TYPES[type]) return { submission_type: type, peer_review: peer, preset: '', label: 'Custom' };
-  return { submission_type: type, peer_review: peer, preset: peer ? 'peer' : 'respond', label: activityLabel_(type, peer) };
+  const rawBg = String((session && session.sketch_background) || '').trim().toLowerCase();
+  const background = SKETCH_BACKGROUNDS.indexOf(rawBg) >= 0 ? rawBg : 'blank';
+  if (!SUBMISSION_TYPES[type]) return { submission_type: type, peer_review: peer, preset: '', label: 'Custom', background };
+  return { submission_type: type, peer_review: peer, preset: peer ? 'peer' : 'respond', label: activityLabel_(type, peer), background };
 }
 
 // ===== Student view cache =====
@@ -121,7 +129,7 @@ function getPhaseForSession(session) {
 
 // All functions here take a login token (from apiInstructorLogin) as their first argument.
 
-/** Start (or reopen) a session. activity is { submission_type, peer_review } or a preset
+/** Start (or reopen) a session. activity is { submission_type, peer_review, background } or a preset
  *  name ('respond' | 'peer'). A session in its peer review phase keeps its settings, so a
  *  review isn't stranded. */
 function apiStartSession(token, session_id, duration_mins, activity){
@@ -134,6 +142,7 @@ function apiStartSession(token, session_id, duration_mins, activity){
   const sh = getSheetByName(SHEET_SESSIONS);
   ensureHeaderColumn_(sh, 'submission_type');
   ensureHeaderColumn_(sh, 'peer_review');
+  ensureHeaderColumn_(sh, 'sketch_background');
   const { header: hdr, rows } = readTable(sh);
 
   // Required columns only (these must exist in your sheet)
@@ -155,6 +164,7 @@ function apiStartSession(token, session_id, duration_mins, activity){
   const applySettings = (base) => {
     setIfExists(sh, base, hdr, 'submission_type', chosen.submission_type);
     setIfExists(sh, base, hdr, 'peer_review', chosen.peer_review ? 'TRUE' : 'FALSE');
+    setIfExists(sh, base, hdr, 'sketch_background', chosen.background);
   };
 
   if (rowIndex >= 0) {
@@ -209,6 +219,7 @@ function apiStartSession(token, session_id, duration_mins, activity){
         case 'is_poll_mode':  return 'FALSE';
         case 'submission_type': return chosen.submission_type;
         case 'peer_review':   return chosen.peer_review ? 'TRUE' : 'FALSE';
+        case 'sketch_background': return chosen.background;
         default:              return '';
       }
     });
@@ -332,7 +343,7 @@ function apiGetSessionState(token, session_id) {
  *   2. their most recently opened peer review (peer_open = TRUE), open or past its deadline;
  *   3. otherwise nothing.
  * Returns { ok, session_id, phase: 'writing'|'review'|'', writing_open, reviews_open, peer_until,
- *           settings: { submission_type, peer_review, preset, label } }.
+ *           settings: { submission_type, peer_review, preset, label, background } }.
  * Polled by student pages, so results are cached briefly (see STUDENT_VIEW_CACHE_SECS).
  */
 function apiGetStudentView(instructor_id) {

@@ -31,15 +31,24 @@ function writeResponse_(payload) {
   });
 }
 
-// Math responses (math activities): up to MATH_MAX_LINES equations of LaTeX, at most
-// MATH_MAX_LINE_CHARS each, kept as JSON in the response_content column:
-//   {"math": ["\\bar{x} = 4.2", ...], "math_edited": [...]}
+// Math and drawing responses are kept as JSON in the response_content column:
+//   {"math": ["\\bar{x} = 4.2", ...], "math_edited": [...], "sketch": {...}}
 // math is what the student submitted and never changes; math_edited is the instructor's
 // correction, shown instead of it everywhere (like response_text_edited for text).
 // response_text_original also gets a readable copy of the submission ($$...$$ per line).
 // Rows from before math activities were maths-only may also have "text".
+//
+// A drawing ("sketch") is pen strokes on a SKETCH_W x SKETCH_H canvas, in whole units:
+//   {"v": 1, "bg": "axes", "s": [[colour, x0, y0, dx1, dy1, dx2, dy2, ...], ...]}
+// Each stroke is a colour index then its first point, then each next point as a step from
+// the previous one, which keeps drawings small enough for a Sheets cell (50,000 characters).
 const MATH_MAX_LINES = 10;
 const MATH_MAX_LINE_CHARS = 1000;
+const SKETCH_W = 600, SKETCH_H = 400, SKETCH_COLOURS = 3;
+const SKETCH_MAX_CHARS = 30000;    // the student page warns well before this
+const SKETCH_MAX_STROKES = 600;
+const SKETCH_MAX_POINTS = 12000;
+const CONTENT_MAX_CHARS = 49000;   // whole response_content cell, under Sheets' 50,000 limit
 
 /** Trimmed, non-blank equation lines, or throws if there are too many or one is too long */
 function cleanMathLines_(lines) {
@@ -49,26 +58,60 @@ function cleanMathLines_(lines) {
   return math;
 }
 
+/** A drawing checked and rebuilt from numbers only, or null if there's nothing drawn.
+ *  Throws if it's malformed or too detailed. */
+function cleanSketch_(sketch) {
+  if (sketch === undefined || sketch === null || sketch === '') return null;
+  const bad = () => new Error('The drawing could not be read. Please try again.');
+  const big = () => new Error('Your drawing is too detailed to save. Try fewer or simpler lines.');
+  if (typeof sketch !== 'object' || !Array.isArray(sketch.s)) throw bad();
+  if (!sketch.s.length) return null;
+  if (sketch.s.length > SKETCH_MAX_STROKES) throw big();
+  const M = 20;  // strokes may run slightly off the edge
+  let points = 0;
+  const strokes = sketch.s.map(a => {
+    if (!Array.isArray(a) || a.length < 3 || a.length % 2 === 0) throw bad();
+    const n = a.map(Number);
+    if (n.some(v => !Number.isInteger(v))) throw bad();
+    if (n[0] < 0 || n[0] >= SKETCH_COLOURS) throw bad();
+    let x = n[1], y = n[2];
+    const inside = () => x >= -M && x <= SKETCH_W + M && y >= -M && y <= SKETCH_H + M;
+    if (!inside()) throw bad();
+    for (let i = 3; i < n.length; i += 2) {
+      x += n[i]; y += n[i + 1];
+      if (!inside()) throw bad();
+    }
+    points += (n.length - 1) / 2;
+    return n;
+  });
+  if (points > SKETCH_MAX_POINTS) throw big();
+  const out = { v: 1, bg: SKETCH_BACKGROUNDS.indexOf(sketch.bg) >= 0 ? sketch.bg : 'blank', s: strokes };
+  if (JSON.stringify(out).length > SKETCH_MAX_CHARS) throw big();
+  return out;
+}
+
 function parseContent_(content) {
   if (!content) return null;
   try { const c = JSON.parse(String(content)); return (c && typeof c === 'object') ? c : null; } catch (e) { return null; }
 }
 
-/** The parts of a response to show: { text, math: [latex...], corrected }. Takes raw cell values.
- *  corrected is true when the instructor has edited the equations. */
+/** The parts of a response to show: { text, math: [latex...], corrected, sketch }. Takes raw
+ *  cell values. corrected is true when the instructor has edited the equations; sketch is
+ *  the drawing or null. */
 function responseParts_(edited, original, content) {
   const c = parseContent_(content);
   if (c) {
     const corrected = Array.isArray(c.math_edited);
     const math = (corrected ? c.math_edited : (Array.isArray(c.math) ? c.math : [])).map(String);
-    return { text: String(edited || '') || String(c.text || ''), math, corrected };
+    const sketch = (c.sketch && Array.isArray(c.sketch.s)) ? c.sketch : null;
+    return { text: String(edited || '') || String(c.text || ''), math, corrected, sketch };
   }
-  return { text: String(edited || '') || String(original || ''), math: [], corrected: false };
+  return { text: String(edited || '') || String(original || ''), math: [], corrected: false, sketch: null };
 }
 
 /** Student submission: disabled during review. payload: { response_text_original,
- *  reviewer_token, confidence } for text activities, or { math: [latex...], reviewer_token,
- *  confidence } for math activities (equations only, no text). */
+ *  reviewer_token, confidence } for text activities; for math and drawing activities
+ *  { math: [latex...], sketch: {...}, reviewer_token, confidence } (no text). */
 function apiSubmitResponse(session_id, payload) {
   payload = payload || {};
   const session = getSession(session_id);
@@ -78,7 +121,8 @@ function apiSubmitResponse(session_id, payload) {
   const phase = getPhaseForSession(session); // writing | review
   if (phase === 'review') throw new Error('Writing is disabled during peer review.');
   const type = getSessionSettings_(session).submission_type;
-  if (type !== 'text' && type !== 'math') {
+  const kind = SUBMISSION_TYPES[type];
+  if (!kind) {
     throw new Error('This activity expects a different kind of submission. Please reload the page.');
   }
   const settings = getSettings();
@@ -98,23 +142,35 @@ function apiSubmitResponse(session_id, payload) {
     phase_at_submit: phase  // stamp phase at submit time
   };
 
-  if (type === 'math') {
-    if (text) throw new Error('This activity takes equations only. Please reload the page.');
-    if (!math.length) throw new Error('Please add an equation.');
-    if (math.join('').length < settings.min_chars) throw new Error('Response too short.');
-    // Equations can't be masked without breaking them: a listed term is blocked or flagged
-    const prof = hasProfanity(math.join(' '), profList);
+  if (kind.math || kind.sketch) {
+    const sketch = cleanSketch_(payload.sketch);
+    if (text) throw new Error('This activity takes ' + (kind.math ? 'equations' : 'a drawing') + ', not text. Please reload the page.');
+    if (math.length && !kind.math) throw new Error('This activity takes a drawing, not equations. Please reload the page.');
+    if (sketch && !kind.sketch) throw new Error('This activity takes equations, not a drawing. Please reload the page.');
+    if (!math.length && !sketch) {
+      throw new Error(kind.math && kind.sketch ? 'Please add an equation or a drawing.' : kind.math ? 'Please add an equation.' : 'Please draw something.');
+    }
+    if (math.length && !sketch && math.join('').length < settings.min_chars) throw new Error('Response too short.');
+    // Equations can't be masked without breaking them: a listed term is blocked or flagged.
+    // Drawings can't be checked.
+    const prof = math.length > 0 && hasProfanity(math.join(' '), profList);
     if (prof && action === 'block') throw new Error('Your response contains disallowed terms.');
     rowPayload.profanity_flag = prof ? 'FLAGGED' : 'NONE';
-    rowPayload.response_text_original = math.map(l => '$$' + l + '$$').join('\n');
+    const readable = math.map(l => '$$' + l + '$$');
+    if (sketch) readable.push(`[drawing: ${sketch.s.length} line${sketch.s.length === 1 ? '' : 's'}]`);
+    rowPayload.response_text_original = readable.join('\n');
     rowPayload.response_text_edited = '';
+    const content = {};
+    if (math.length) content.math = math;
+    if (sketch) content.sketch = sketch;
+    rowPayload.response_content = JSON.stringify(content);
+    if (rowPayload.response_content.length > CONTENT_MAX_CHARS) throw new Error('Your answer is too large to save. Try a simpler drawing.');
     ensureHeaderColumn_(getResponsesSheet(), 'response_content');
-    rowPayload.response_content = JSON.stringify({ math });
     return { ok: true, response_id: writeResponse_(rowPayload) };
   }
 
   // Text activity
-  if (math.length) throw new Error('This activity takes text only. Please reload the page.');
+  if (math.length || cleanSketch_(payload.sketch)) throw new Error('This activity takes text only. Please reload the page.');
   const words = text.split(/\s+/).filter(Boolean);
   if (!text) throw new Error('Please enter a response.');
   if (settings.max_words && words.length > settings.max_words) {
@@ -182,6 +238,7 @@ function listResponsesForInstructor_(instructor_id, session_id) {
       text: parts.text,   // the text part to show (instructor edit, else what the student wrote)
       math: parts.math,   // equations (LaTeX) to show, math activities only
       corrected: parts.corrected,  // the instructor has edited the equations
+      sketch: parts.sketch,        // the drawing, drawing activities only (or null)
       response_text_original: String(r[idx('response_text_original')] || ''),
       response_text_edited: String(r[idx('response_text_edited')] || ''),
       timestamp: String(r[idx('timestamp')] || ''),
@@ -237,7 +294,9 @@ function apiUpdateResponse(token, response_id, patch) {
       if (JSON.stringify(lines) === JSON.stringify(content.math)) delete content.math_edited;  // back to the original
       else content.math_edited = lines;
     }
-    sh.getRange(2 + rIndex, cCol + 1).setValue(JSON.stringify(content));
+    const json = JSON.stringify(content);
+    if (json.length > CONTENT_MAX_CHARS) throw new Error('This answer is too large to save with these equations. Try fewer or shorter lines.');
+    sh.getRange(2 + rIndex, cCol + 1).setValue(json);
     const parts = responseParts_('', '', JSON.stringify(content));
     result = { ok: true, math: parts.math, corrected: parts.corrected };
   }
@@ -294,5 +353,5 @@ function apiGetResponseText(session_id, response_id) {
 
   const cCol = hdr.indexOf('response_content');
   const parts = responseParts_(row[txtECol], row[txtOCol], cCol >= 0 ? row[cCol] : '');
-  return { ok:true, response_id: String(response_id), text: parts.text, math: parts.math };
+  return { ok:true, response_id: String(response_id), text: parts.text, math: parts.math, sketch: parts.sketch };
 }

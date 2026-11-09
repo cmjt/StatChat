@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <?!= include('student_styles') ?>
   <?!= include('math_render') ?>
+  <?!= include('sketch') ?>
 </head>
 <body>
   <div class="container">
@@ -47,6 +48,21 @@
       <div class="small" id="mathHelp"></div>
       <div id="mathLines"></div>
       <button type="button" id="addMathBtn" class="btn btn-view btn-small" onclick="addMathLine()" disabled>＋<span class="btn-label">Add line</span></button>
+    </div>
+
+    <!-- Drawing pad: drawing activities -->
+    <div id="sketchSection" style="display:none; margin-top:10px;">
+      <label>Your drawing</label>
+      <div class="sketchTools" role="toolbar" aria-label="Drawing tools">
+        <button type="button" class="sketchTool" data-tool="pen" data-colour="0" onclick="setSketchTool('pen', 0)" title="Black pen" aria-label="Black pen"><span class="swatch" style="background:#111827"></span></button>
+        <button type="button" class="sketchTool" data-tool="pen" data-colour="1" onclick="setSketchTool('pen', 1)" title="Blue pen" aria-label="Blue pen"><span class="swatch" style="background:#1d4ed8"></span></button>
+        <button type="button" class="sketchTool" data-tool="pen" data-colour="2" onclick="setSketchTool('pen', 2)" title="Red pen" aria-label="Red pen"><span class="swatch" style="background:#dc2626"></span></button>
+        <button type="button" class="sketchTool" data-tool="eraser" onclick="setSketchTool('eraser')" title="Eraser: removes whole lines">Eraser</button>
+        <button type="button" class="sketchTool" onclick="undoSketch()" title="Undo">↶ Undo</button>
+        <button type="button" class="sketchTool" onclick="if (confirm('Clear your drawing?')) clearSketch()" title="Clear the drawing (Undo brings it back)">Clear</button>
+      </div>
+      <div id="sketchPad" class="sketchPad"></div>
+      <div class="small" id="sketchSize"></div>
     </div>
     
     <!-- Confidence buttons -->
@@ -109,6 +125,7 @@
   <script>const SERVER_INST = '<?= inst ?>';</script>
   <?!= include('student_core') ?>
   <?!= include('student_math') ?>
+  <?!= include('student_sketch') ?>
   <?!= include('student_peer') ?>
   <script>init();</script>
 </body>

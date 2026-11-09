@@ -35,7 +35,7 @@ eq('response_content column added', sheetRows('Responses')[0].includes('response
 let row = lastRow();
 eq('equations stored as JSON (blank lines dropped)', JSON.parse(row.response_content), { math: ['\\bar{x} = 4.2', 's^2 = 1.1'] });
 eq('readable copy in response_text_original', row.response_text_original, '$$\\bar{x} = 4.2$$\n$$s^2 = 1.1$$');
-throws('text refused in a math activity', () => submit('m1', 'some words', ['x = 1']), /equations only/);
+throws('text refused in a math activity', () => submit('m1', 'some words', ['x = 1']), /not text/);
 throws('no equations rejected', () => submit('m1', '', ['', ' ']), /add an equation/);
 throws('more than 10 lines rejected', () => submit('m1', '', Array(11).fill('x')), /at most 10/);
 throws('very long equation rejected', () => submit('m1', '', ['x'.repeat(1001)]), /too long/);
@@ -89,6 +89,6 @@ const mine = apiGetMyFeedback('m1', 'bob');
 eq('feedback received includes own (corrected) equations', [mine.locked, mine.feedback[0].response_math], [false, ['E=mc^{2}']]);
 
 // Rows from earlier versions read as before
-eq('text rows: no equations', responseParts_('', 'just text', ''), { text: 'just text', math: [], corrected: false });
-eq('bad JSON falls back to text', responseParts_('', 'orig', '{oops'), { text: 'orig', math: [], corrected: false });
-eq('earlier text + math rows keep their text', responseParts_('', 'x', '{"text":"hello","math":["x=1"]}'), { text: 'hello', math: ['x=1'], corrected: false });
+eq('text rows: no equations', responseParts_('', 'just text', ''), { text: 'just text', math: [], corrected: false, sketch: null });
+eq('bad JSON falls back to text', responseParts_('', 'orig', '{oops'), { text: 'orig', math: [], corrected: false, sketch: null });
+eq('earlier text + math rows keep their text', responseParts_('', 'x', '{"text":"hello","math":["x=1"]}'), { text: 'hello', math: ['x=1'], corrected: false, sketch: null });

@@ -1,0 +1,177 @@
+  <!-- student_sketch: the drawing pad for drawing activities. Drawing format and SVG output
+       are in sketch.html; the pad draws with the same SVG, so students see what's saved. -->
+  <script>
+    let SKETCH_STROKES = [];      // [{ c, pts: [[x, y], ...] }] in canvas units (600 x 400)
+    let SKETCH_HISTORY = [];      // undo steps: { add: stroke } | { erase: [{ i, st }] } | { clear: [strokes] }
+    let SKETCH_TOOL = 'pen';      // 'pen' | 'eraser'
+    let SKETCH_COLOUR = 0;
+    let SKETCH_ENABLED = false;
+    let SKETCH_BG = 'blank';
+    let SKETCH_LIVE = null;       // points of the stroke being drawn
+    let SKETCH_ERASED = null;     // strokes removed by the current eraser drag
+    let SKETCH_POINTER = null;    // pointerId being followed (one finger/pen at a time)
+    let SKETCH_PEN_SEEN = false;  // once a stylus is used, ignore touches (resting palm)
+    let SKETCH_PAD = null;        // { svg, bg, strokes, live }
+    const SKETCH_ERASE_RADIUS = 10;
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+
+    function isSketchActivity(){ return answerKind().sketch; }
+
+    /** Show or hide the drawing pad; called from updateAnswerUI */
+    function updateSketchUI(canWrite){
+      const show = !!SESSION_ID && CURRENT_PHASE !== 'review' && isSketchActivity();
+      document.getElementById('sketchSection').style.display = show ? 'block' : 'none';
+      if (show) {
+        ensureSketchPad();
+        const bg = (SETTINGS && SETTINGS.background) || 'blank';
+        if (bg !== SKETCH_BG) { SKETCH_BG = bg; SKETCH_PAD.bg.innerHTML = sketchBackgroundSVG(bg); }
+      }
+      setSketchEnabled(show && canWrite);
+    }
+
+    function ensureSketchPad(){
+      if (SKETCH_PAD) return;
+      const svg = document.createElementNS(SVG_NS, 'svg');
+      svg.setAttribute('viewBox', `0 0 ${SKETCH_W} ${SKETCH_H}`);
+      svg.setAttribute('class', 'sketchSvg sketchPadSvg');
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-label', 'Drawing area');
+      const bg = document.createElementNS(SVG_NS, 'g');
+      const strokes = document.createElementNS(SVG_NS, 'g');
+      const live = document.createElementNS(SVG_NS, 'path');
+      live.setAttribute('fill', 'none');
+      live.setAttribute('stroke-width', String(SKETCH_STROKE_W));
+      live.setAttribute('stroke-linecap', 'round');
+      live.setAttribute('stroke-linejoin', 'round');
+      svg.appendChild(bg); svg.appendChild(strokes); svg.appendChild(live);
+      document.getElementById('sketchPad').appendChild(svg);
+      SKETCH_PAD = { svg, bg, strokes, live };
+      SKETCH_BG = '';   // background drawn by updateSketchUI
+
+      const toCanvas = (e) => {
+        const r = svg.getBoundingClientRect();
+        return [(e.clientX - r.left) / r.width * SKETCH_W, (e.clientY - r.top) / r.height * SKETCH_H];
+      };
+      svg.addEventListener('pointerdown', e => {
+        if (!SKETCH_ENABLED || SKETCH_POINTER !== null) return;
+        if (e.pointerType === 'pen') SKETCH_PEN_SEEN = true;
+        else if (e.pointerType === 'touch' && SKETCH_PEN_SEEN) return;
+        e.preventDefault();
+        try { svg.setPointerCapture(e.pointerId); } catch (err) {}
+        SKETCH_POINTER = e.pointerId;
+        sketchStart(toCanvas(e));
+      });
+      svg.addEventListener('pointermove', e => {
+        if (e.pointerId !== SKETCH_POINTER) return;
+        e.preventDefault();
+        const events = (typeof e.getCoalescedEvents === 'function' && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
+        events.forEach(ev => sketchMove(toCanvas(ev)));
+      });
+      const end = e => { if (e.pointerId === SKETCH_POINTER) { SKETCH_POINTER = null; sketchEnd(); } };
+      svg.addEventListener('pointerup', end);
+      svg.addEventListener('pointercancel', end);
+      setSketchTool('pen', 0);
+    }
+
+    // --- Drawing, in canvas units (the pointer handlers above convert) ---
+    function sketchStart(p){
+      if (SKETCH_TOOL === 'eraser') { SKETCH_ERASED = []; eraseAt(p); return; }
+      SKETCH_LIVE = [p];
+      drawLive();
+    }
+    function sketchMove(p){
+      if (SKETCH_TOOL === 'eraser') { if (SKETCH_ERASED) eraseAt(p); return; }
+      if (!SKETCH_LIVE) return;
+      const last = SKETCH_LIVE[SKETCH_LIVE.length - 1];
+      if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 1.5) return;
+      SKETCH_LIVE.push(p);
+      drawLive();
+    }
+    function sketchEnd(){
+      if (SKETCH_TOOL === 'eraser') {
+        if (SKETCH_ERASED && SKETCH_ERASED.length) SKETCH_HISTORY.push({ erase: SKETCH_ERASED });
+        SKETCH_ERASED = null;
+      } else if (SKETCH_LIVE) {
+        const st = finishStroke(SKETCH_COLOUR, SKETCH_LIVE);
+        SKETCH_STROKES.push(st);
+        SKETCH_HISTORY.push({ add: st });
+        SKETCH_LIVE = null;
+      }
+      drawLive();
+      renderSketch();
+    }
+    /** The eraser removes whole lines it touches */
+    function eraseAt([px, py]){
+      const near = st => st.pts.some((p, i) => {
+        const q = st.pts[i + 1] || p;
+        const dx = q[0] - p[0], dy = q[1] - p[1], len2 = dx * dx + dy * dy;
+        const t = len2 ? Math.max(0, Math.min(1, ((px - p[0]) * dx + (py - p[1]) * dy) / len2)) : 0;
+        return Math.hypot(px - (p[0] + t * dx), py - (p[1] + t * dy)) <= SKETCH_ERASE_RADIUS;
+      });
+      let changed = false;
+      for (let i = SKETCH_STROKES.length - 1; i >= 0; i--) {
+        if (near(SKETCH_STROKES[i])) { SKETCH_ERASED.push({ i, st: SKETCH_STROKES[i] }); SKETCH_STROKES.splice(i, 1); changed = true; }
+      }
+      if (changed) renderSketch();
+    }
+    function undoSketch(){
+      const step = SKETCH_HISTORY.pop();
+      if (!step) return;
+      if (step.add) SKETCH_STROKES = SKETCH_STROKES.filter(st => st !== step.add);
+      else if (step.erase) step.erase.slice().reverse().forEach(({ i, st }) => SKETCH_STROKES.splice(i, 0, st));
+      else if (step.clear) SKETCH_STROKES = step.clear;
+      renderSketch();
+    }
+    function clearSketch(){
+      if (!SKETCH_STROKES.length) return;
+      SKETCH_HISTORY.push({ clear: SKETCH_STROKES });
+      SKETCH_STROKES = [];
+      renderSketch();
+    }
+    /** After a successful submit: a fresh, empty pad (no undo back into the old drawing) */
+    function resetSketch(){
+      SKETCH_STROKES = []; SKETCH_HISTORY = [];
+      renderSketch();
+    }
+
+    function setSketchTool(tool, colour){
+      SKETCH_TOOL = tool;
+      if (tool === 'pen' && colour !== undefined) SKETCH_COLOUR = colour;
+      document.querySelectorAll('.sketchTool[data-tool]').forEach(b => {
+        const on = b.dataset.tool === tool && (tool !== 'pen' || Number(b.dataset.colour) === SKETCH_COLOUR);
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      if (SKETCH_PAD) SKETCH_PAD.svg.classList.toggle('erasing', tool === 'eraser');
+    }
+    function setSketchEnabled(on){
+      SKETCH_ENABLED = !!on;
+      document.querySelectorAll('.sketchTool').forEach(b => { b.disabled = !SKETCH_ENABLED; });
+      if (SKETCH_PAD) SKETCH_PAD.svg.classList.toggle('disabled', !SKETCH_ENABLED);
+    }
+
+    function drawLive(){
+      if (!SKETCH_PAD) return;
+      const live = SKETCH_PAD.live;
+      if (!SKETCH_LIVE) { live.setAttribute('d', ''); return; }
+      live.setAttribute('stroke', SKETCH_COLOURS[SKETCH_COLOUR]);
+      live.setAttribute('d', strokePathD(SKETCH_LIVE.map(([x, y]) => [Math.round(x), Math.round(y)])));
+    }
+    function renderSketch(){
+      if (SKETCH_PAD) SKETCH_PAD.strokes.innerHTML = SKETCH_STROKES.map(strokeSVG).join('');
+      const info = document.getElementById('sketchSize');
+      const pct = Math.round(sketchSize() / SKETCH_MAX_CHARS * 100);
+      info.textContent = pct >= 100 ? `Your drawing is too detailed to save (${pct}% of the limit). Undo or erase some lines.`
+        : pct >= 70 ? `Your drawing is getting detailed (${pct}% of the limit).` : '';
+      info.className = 'small' + (pct >= 100 ? ' err' : '');
+    }
+
+    /** The drawing to submit, or null if nothing is drawn */
+    function getSketch(){
+      return SKETCH_STROKES.length ? { v: 1, bg: SKETCH_BG || 'blank', s: SKETCH_STROKES.map(encodeStroke) } : null;
+    }
+    function sketchSize(){
+      const s = getSketch();
+      return s ? JSON.stringify(s).length : 0;
+    }
+  </script>

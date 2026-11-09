@@ -15,6 +15,7 @@ const shown = () => el('mathSection').style.display === 'block';
 const stored = () => sheetObjects('Responses').map(r => r.response_content ? JSON.parse(r.response_content) : r.response_text_original);
 
 // Text activity: text box, no equation lines, MathLive not downloaded
+// Later sessions get longer durations: the student sees the live session that ends last
 __SERVER.apiStartSession(tok, 'txt', 60, { submission_type: 'text', peer_review: false });
 init();
 eq('text activity: text box, no equation lines', [el('textSection').style.display, shown()], ['block', false]);
@@ -22,7 +23,7 @@ eq('text activity: MathLive not loaded', document.head.children.length, 0);
 
 // Switch to Math: the text box is replaced by equation lines, and MathLive starts loading
 el('responseText').value = 'half-typed text';
-__SERVER.apiStartSession(tok, 'maths', 60, { submission_type: 'math', peer_review: false });
+__SERVER.apiStartSession(tok, 'maths', 61, { submission_type: 'math', peer_review: false });
 pollView();
 eq('math activity: equation lines instead of text box', [shown(), el('textSection').style.display, el('activityLabel').textContent], [true, 'none', 'Quick response · math']);
 const script = document.head.children[0];
@@ -70,6 +71,6 @@ eq('server error shown, work kept, nothing stored', [/too long/.test(el('status'
 __SERVER.apiStopSession(tok, 'maths');
 pollView();
 eq('session stopped: section hidden, lines disabled', [shown(), MATH_FIELDS[0].field.disabled, el('addMathBtn').disabled], [false, true, true]);
-__SERVER.apiStartSession(tok, 'maths', 60, { submission_type: 'text', peer_review: false });
+__SERVER.apiStartSession(tok, 'maths', 62, { submission_type: 'text', peer_review: false });
 pollView();
 eq('back to text: text box back with its draft, equations kept', [el('textSection').style.display, el('responseText').value, shown(), MATH_FIELDS[0].field.value.length], ['block', 'half-typed text', false, 1001]);

@@ -27,6 +27,8 @@ const document = {
   getElementById: id => (__elements[id] = __elements[id] || new FakeEl(id)),
   createElement: tag => Object.assign(new FakeEl(''), { tagName: String(tag).toUpperCase() }),
   head: new FakeEl('head'),
+  body: new FakeEl('body'),
+  createElementNS: (ns, tag) => Object.assign(new FakeEl(''), { tagName: String(tag), namespaceURI: ns }),
   querySelector: () => null,
   querySelectorAll: () => [],
   addEventListener: (type, fn) => { (__docListeners[type] = __docListeners[type] || []).push(fn); },

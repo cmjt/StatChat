@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <?!= include('dashboard_styles') ?>
   <?!= include('math_render') ?>
+  <?!= include('sketch') ?>
 </head>
 <body>
 
@@ -33,12 +34,32 @@
         <fieldset class="presetPicker">
           <legend>Students submit</legend>
           <label class="presetOption">
-            <input type="radio" name="submissionType" value="text" checked>
+            <input type="radio" name="submissionType" value="text" checked onchange="updateLoginOptions()">
             <span><b>Text</b><br><small>Short written answers or poll replies.</small></span>
           </label>
           <label class="presetOption">
-            <input type="radio" name="submissionType" value="math">
+            <input type="radio" name="submissionType" value="math" onchange="updateLoginOptions()">
             <span><b>Math</b><br><small>Typed equations only (no text), using an equation editor with a maths keyboard on phones and tablets. Click an answer on the board to correct it.</small></span>
+          </label>
+          <label class="presetOption">
+            <input type="radio" name="submissionType" value="sketch" onchange="updateLoginOptions()">
+            <span><b>Drawing</b><br><small>Students draw with a finger, stylus or mouse, e.g. "sketch the shape of this distribution". Click a drawing on the board to enlarge it.</small></span>
+          </label>
+          <label class="presetOption">
+            <input type="radio" name="submissionType" value="math_sketch" onchange="updateLoginOptions()">
+            <span><b>Math &amp; drawing</b><br><small>Equations and/or a drawing in the same answer.</small></span>
+          </label>
+        </fieldset>
+        <fieldset class="presetPicker" id="backgroundPicker" style="display:none;">
+          <legend>Draw on</legend>
+          <label class="presetOption inline">
+            <input type="radio" name="sketchBackground" value="blank" checked><span>Blank</span>
+          </label>
+          <label class="presetOption inline">
+            <input type="radio" name="sketchBackground" value="grid"><span>Grid</span>
+          </label>
+          <label class="presetOption inline">
+            <input type="radio" name="sketchBackground" value="axes"><span>Axes</span>
           </label>
         </fieldset>
         <fieldset class="presetPicker">

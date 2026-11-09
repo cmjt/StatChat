@@ -72,7 +72,7 @@
       const v = (res && res.ok && res.session_id) ? res : null;
       const st = v && v.settings ? v.settings : null;
       const sig = v
-        ? [v.session_id, v.phase, v.writing_open, v.reviews_open, v.peer_until, st && st.submission_type, st && st.peer_review].join('|')
+        ? [v.session_id, v.phase, v.writing_open, v.reviews_open, v.peer_until, st && st.submission_type, st && st.peer_review, st && st.background].join('|')
         : 'none';
       if (sig === VIEW_SIG) return;
       const first = VIEW_SIG === '';
@@ -141,7 +141,7 @@
         reviewEl.style.display = 'none';
         if (feedbackPanel) feedbackPanel.style.display = 'none';
         setNote('');
-        updateMathUI(false);
+        updateAnswerUI(false);
         return;
       }
 
@@ -161,7 +161,7 @@
             ? (when ? `Reviews can be submitted until ${when}.` : '')
             : `Peer review has closed${when ? ' (' + when + ')' : ''}. You can still read feedback you received if you completed your reviews.`;
         }
-        updateMathUI(false);
+        updateAnswerUI(false);
         maybeLoadAssignments();
       } else { // writing
         textEl.placeholder = WRITING_OPEN ? 'Write your answer…' : 'Writing is closed.';
@@ -172,7 +172,7 @@
         setNote(SETTINGS && SETTINGS.peer_review
           ? "This activity includes peer review: after writing, you'll review classmates' responses and get feedback on yours."
           : '');
-        updateMathUI(WRITING_OPEN);
+        updateAnswerUI(WRITING_OPEN);
       }
     }
 
@@ -242,6 +242,18 @@
         btn.classList.add('active');
       });
     });
+    /** What this activity's answer is made of: equations, a drawing, or (neither) text */
+    function answerKind(){
+      const t = SETTINGS && SETTINGS.submission_type;
+      return { math: t === 'math' || t === 'math_sketch', sketch: t === 'sketch' || t === 'math_sketch' };
+    }
+    /** Math and drawing activities replace the text box; called from applyPhaseUI */
+    function updateAnswerUI(canWrite){
+      const k = answerKind();
+      document.getElementById('textSection').style.display = (k.math || k.sketch) ? 'none' : 'block';
+      updateMathUI(canWrite);
+      updateSketchUI(canWrite);
+    }
     function submittedMessage(){
       return (SETTINGS && SETTINGS.peer_review)
         ? 'Submitted. Thank you! Peer review will appear here when your instructor opens it.'
@@ -249,15 +261,22 @@
     }
     function submitResponse(){
       const reviewerToken = REVIEWER_TOKEN;
-      const isMath   = isMathActivity();   // math activities send equations only, no text
+      const kind     = answerKind();       // math/drawing activities send no text
+      const isMath   = kind.math || kind.sketch;
       const text     = isMath ? '' : document.getElementById('responseText').value.trim();
       const conf     = Number(document.getElementById('confidence').value);
-      const math     = isMath ? getMathLines() : [];
+      const math     = kind.math ? getMathLines() : [];
+      const sketch   = kind.sketch ? getSketch() : null;
 
       if (CURRENT_PHASE === 'review') { setStatus('Writing is disabled during peer review.', true); return; }
       if (!WRITING_OPEN) { setStatus('Writing is closed for this activity.', true); return; }
-      if (!text && !math.length) {
-        setStatus(isMath ? 'Please add an equation.' : 'Please enter a response.', true);
+      if (!text && !math.length && !sketch) {
+        setStatus(kind.math && kind.sketch ? 'Please add an equation or a drawing.'
+          : kind.math ? 'Please add an equation.' : kind.sketch ? 'Please draw something.' : 'Please enter a response.', true);
+        return;
+      }
+      if (sketch && sketchSize() > SKETCH_MAX_CHARS) {
+        setStatus('Your drawing is too detailed to save. Undo or erase some lines.', true);
         return;
       }
       if (!SESSION_ID) { setStatus('No active session. Please try again later.', true); return; }
@@ -265,13 +284,15 @@
       setStatus('Submitting…');
       document.getElementById('submitBtn').disabled = true;
 
-      const payload = isMath
-        ? { math, reviewer_token: reviewerToken, confidence: conf }
-        : { response_text_original: text, reviewer_token: reviewerToken, confidence: conf };
+      const payload = !isMath
+        ? { response_text_original: text, reviewer_token: reviewerToken, confidence: conf }
+        : { math, sketch, reviewer_token: reviewerToken, confidence: conf };
 
       const submitted = () => {
-        if (isMath) clearMathLines();
-        else {
+        if (isMath) {
+          if (kind.math) clearMathLines();
+          if (kind.sketch) resetSketch();
+        } else {
           document.getElementById('responseText').value = '';
           document.getElementById('wordCount').textContent = 'Words: 0';
         }
