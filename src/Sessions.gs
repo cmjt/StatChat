@@ -1,15 +1,20 @@
 // Sessions.gs — Session lifecycle and state: writing window, phase, what students and the dashboard see.
 // All .gs files share one global scope in Apps Script.
 
-function getSession(session_id) {
+/** Look up a session by ID. Pass instructor_id whenever it's known: session IDs aren't
+ *  unique across instructors, so without it the first row with that ID is returned. */
+function getSession(session_id, instructor_id) {
   const sh = getSheetByName(SHEET_SESSIONS);
   const { header: hdr, rows } = readTable(sh);
   const idCol = hdr.indexOf('session_id');
   if (idCol === -1) throw new Error('Missing column session_id in Sessions.');
   const target = String(session_id).trim().toLowerCase();
+  const inst = (instructor_id === undefined || instructor_id === null) ? null : String(instructor_id).trim();
   for (const r of rows) {
     const rec = {}; hdr.forEach((h,i)=>rec[h]=r[i]);
-    if (String(rec.session_id).trim().toLowerCase() === target) return rec;
+    if (String(rec.session_id).trim().toLowerCase() !== target) continue;
+    if (inst !== null && String(rec.instructor_id).trim() !== inst) continue;
+    return rec;
   }
   return null;
 }
@@ -114,7 +119,7 @@ function apiStartSession(token, session_id, duration_mins, preset){
 
   const rowIndex = rows.findIndex(r =>
     String(r[idCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
-    String(r[instCol]) === String(instructor_id)
+    String(r[instCol]).trim() === String(instructor_id).trim()
   );
 
   const now = new Date();
@@ -187,7 +192,7 @@ function apiStartSession(token, session_id, duration_mins, preset){
     sh.appendRow(row);
   }
   invalidateStudentView_(instructor_id);
-  const settings = getSessionSettings_(getSession(session_id));
+  const settings = getSessionSettings_(getSession(session_id, instructor_id));
   return { ok:true, session_id, active_until: until.toISOString(), phase, settings, settings_kept: settingsKept };
 }
 
@@ -206,11 +211,11 @@ function apiSetPhase(token, session_id, phase) {
 
   const idxRow = rows.findIndex(r =>
     String(r[idCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
-    String(r[instCol]) === String(instructor_id)
+    String(r[instCol]).trim() === String(instructor_id).trim()
   );
   if (idxRow === -1) throw new Error('Session not found for instructor.');
   const base = 2 + idxRow;
-  if (phase === 'review' && !getSessionSettings_(getSession(session_id)).peer_review) {
+  if (phase === 'review' && !getSessionSettings_(getSession(session_id, instructor_id)).peer_review) {
     throw new Error('Peer review is not enabled for this session.');
   }
 
@@ -236,7 +241,7 @@ function apiStopSession(token, session_id) {
 
   const idx = rows.findIndex(r =>
     String(r[idCol]).trim().toLowerCase() === String(session_id).trim().toLowerCase() &&
-    String(r[instCol]) === String(instructor_id)
+    String(r[instCol]).trim() === String(instructor_id).trim()
   );
   if (idx === -1) throw new Error('Session not found.');
   const base = 2 + idx;

@@ -8,7 +8,8 @@
     let PEER_UNTIL = '';       // review deadline (ISO) or '' for none
     let WRITING_OPEN = false;  // the session is accepting responses
     let SETTINGS = null;       // activity settings: { submission_type, peer_review, preset, label }
-    const SERVER_INST = '<?= inst ?>';
+    // SERVER_INST (instructor from the URL, filled in by the server) is defined in student.html:
+    // included files aren't evaluated as templates, so template tags do not work here.
     // Peer review UI state, rebuilt whenever the session or review state changes
     let ASSIGNMENTS_LOADED = false;
     let ASSIGNMENTS_LOADING_GEN = -1;

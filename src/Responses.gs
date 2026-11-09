@@ -156,8 +156,8 @@ function apiUpdateResponse(token, response_id, patch) {
   const row = rows[rIndex];
   const sessId = row[sessCol];
 
-  const session = getSession(sessId);
-  if (!session || String(session.instructor_id) !== String(instructor_id)) {
+  const session = getSession(sessId, instructor_id);
+  if (!session) {
     throw new Error('Not authorized to modify this response.');
   }
 

@@ -146,7 +146,7 @@ function apiStartPeerReview(token, session_id, reviews_per_student, peer_until_i
     String(r[instCol]).trim() === String(instructor_id)
   );
   if (rowIdx === -1) throw new Error('Session not found for instructor.');
-  if (!getSessionSettings_(getSession(session_id)).peer_review) {
+  if (!getSessionSettings_(getSession(session_id, instructor_id)).peer_review) {
     throw new Error('Peer review is not enabled for this session. Start it as a "Peer review" activity.');
   }
 

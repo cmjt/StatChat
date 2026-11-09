@@ -56,8 +56,8 @@ function requireInstructor_(token) {
 
 /** Throw unless session_id exists and belongs to instructor_id. */
 function requireSessionOwner_(instructor_id, session_id) {
-  const session = getSession(session_id);
-  if (!session || String(session.instructor_id) !== String(instructor_id)) {
+  const session = getSession(session_id, instructor_id);
+  if (!session) {
     throw new Error('Session not found or not owned by instructor.');
   }
   return session;

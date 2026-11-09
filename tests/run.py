@@ -47,6 +47,14 @@ code, output = run_js(
 print('Syntax'); print(output)
 failed = code != 0 or 'RESULT: PASS' not in output
 
+# Included files are inserted as plain text (createHtmlOutputFromFile), so <? ?> tags in
+# them reach the browser unevaluated. Template tags belong in the page shells only.
+included = set(re.findall(r"include\('([\w]+)'\)", ''.join(read(f) for f in html_files)))
+for n in sorted(included):
+    if '<?' in read(os.path.join(ROOT, 'src', n + '.html')):
+        print(f'  FAIL src/{n}.html is included, so its <? ?> tags are never evaluated')
+        failed = True
+
 # ---- 2. behaviour tests ----
 harness = read(os.path.join(ROOT, 'tests', 'harness.js'))
 page_harness = read(os.path.join(ROOT, 'tests', 'page_harness.js'))
@@ -54,11 +62,13 @@ server_fns = sorted(set(re.findall(r'^\s*function\s+([A-Za-z_$][\w$]*)\s*\(', bu
 
 def page_scripts(page):
     """The <script> code of src/<page>_*.html includes, in include order, as one string."""
+    # Inline the includes as Apps Script does, then take every <script> in page order
     shell = read(os.path.join(ROOT, 'src', page + '.html'))
-    names = re.findall(r"include\('([\w]+)'\)", shell)
-    code = []
-    for n in names:
-        code += re.findall(r'<script>(.*?)</script>', read(os.path.join(ROOT, 'src', n + '.html')), re.S)
+    html = re.sub(r"<\?!=\s*include\('([\w]+)'\)\s*\?>",
+                  lambda m: read(os.path.join(ROOT, 'src', m.group(1) + '.html')), shell)
+    # The shell's own <script>init();</script> is left out: tests call init() once their fake
+    # sheets are set up
+    code = [c for c in re.findall(r'<script>(.*?)</script>', html, re.S) if c.strip() != 'init();']
     return '\n'.join(code).replace("'<?= inst ?>'", "''")
 
 for t in sorted(glob.glob(os.path.join(ROOT, 'tests', 'test_*.js'))):
