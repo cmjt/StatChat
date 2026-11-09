@@ -125,28 +125,38 @@ project, so there's no copying and pasting in the editor.
 
 One-time setup:
 
-1. Install Node.js, then `npm install -g @google/clasp`.
+1. Install Node.js (20 or newer), then `npm install -g @google/clasp`.
 2. `clasp login`. This opens a browser to authorise your Google account.
 3. Enable the Apps Script API at <https://script.google.com/home/usersettings>.
 4. Copy `.clasp.json.example` to `.clasp.json` and paste in your script ID
    (Apps Script editor → Project Settings → Script ID). `.clasp.json` is
-   git-ignored, so you can point it at a test copy of the project.
-5. Get the project's manifest so your deployment settings are kept: in the
-   editor, Project Settings → tick "Show appsscript.json manifest file". Copy
-   `appsscript.json` from the editor into `src/appsscript.json` and commit it.
+   git-ignored, so you can point it at a test copy of the project. The script
+   is bound to the Google Sheet, so `clasp list` won't show it: open the editor
+   from the Sheet (Extensions → Apps Script) to find the ID.
+
+`src/appsscript.json` is the project's manifest (time zone, and the web app
+runs as the deploying user and is open to anyone). It's committed, and `clasp
+push` uploads it with the code.
 
 Each release:
 
 ```bash
 python3 tests/run.py          # all tests must pass
+clasp status                  # lists the files that will be pushed
 clasp push                    # replaces the project's files with src/
 clasp deploy -i <deploymentId> -d "what changed"
 ```
 
-Use `clasp deployments` to find the ID of your existing web app deployment.
-Redeploying to the same ID keeps the web app URL that students use.
-`clasp push` deletes files that aren't in `src/`, which removes the old single
-`Code` file on the first push.
+- `clasp deployments` lists the deployments. Redeploying to your web app's
+  existing ID keeps the URL that students use. Don't use `clasp deploy`
+  without `-i`: that creates a new deployment with a new URL.
+- After `clasp push`, the `@HEAD` deployment (the editor's **Test deployments**
+  `/dev` URL) runs the new code straight away, so you can try it before
+  deploying. Students' links only change when you deploy.
+- `clasp push` replaces every file in the editor with `src/`, so make changes
+  here rather than in the editor. If someone did edit in the editor, pull into
+  a separate folder to compare, not into `src/`: clasp 3 downloads `.gs`
+  files as `.js`.
 
 ## Running the tests
 
