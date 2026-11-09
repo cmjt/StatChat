@@ -141,6 +141,7 @@
         reviewEl.style.display = 'none';
         if (feedbackPanel) feedbackPanel.style.display = 'none';
         setNote('');
+        updateMathUI(false);
         return;
       }
 
@@ -160,6 +161,7 @@
             ? (when ? `Reviews can be submitted until ${when}.` : '')
             : `Peer review has closed${when ? ' (' + when + ')' : ''}. You can still read feedback you received if you completed your reviews.`;
         }
+        updateMathUI(false);
         maybeLoadAssignments();
       } else { // writing
         textEl.placeholder = WRITING_OPEN ? 'Write your answer…' : 'Writing is closed.';
@@ -170,6 +172,7 @@
         setNote(SETTINGS && SETTINGS.peer_review
           ? "This activity includes peer review: after writing, you'll review classmates' responses and get feedback on yours."
           : '');
+        updateMathUI(WRITING_OPEN);
       }
     }
 
@@ -246,44 +249,59 @@
     }
     function submitResponse(){
       const reviewerToken = REVIEWER_TOKEN;
-      const text     = document.getElementById('responseText').value.trim();
+      const isMath   = isMathActivity();   // math activities send equations only, no text
+      const text     = isMath ? '' : document.getElementById('responseText').value.trim();
       const conf     = Number(document.getElementById('confidence').value);
+      const math     = isMath ? getMathLines() : [];
 
       if (CURRENT_PHASE === 'review') { setStatus('Writing is disabled during peer review.', true); return; }
       if (!WRITING_OPEN) { setStatus('Writing is closed for this activity.', true); return; }
-      if (!text)     { setStatus('Please enter a response.', true); return; }
+      if (!text && !math.length) {
+        setStatus(isMath ? 'Please add an equation.' : 'Please enter a response.', true);
+        return;
+      }
       if (!SESSION_ID) { setStatus('No active session. Please try again later.', true); return; }
 
       setStatus('Submitting…');
       document.getElementById('submitBtn').disabled = true;
 
-      const payload = { response_text_original: text, 
-      reviewer_token: reviewerToken, confidence: conf };
+      const payload = isMath
+        ? { math, reviewer_token: reviewerToken, confidence: conf }
+        : { response_text_original: text, reviewer_token: reviewerToken, confidence: conf };
+
+      const submitted = () => {
+        if (isMath) clearMathLines();
+        else {
+          document.getElementById('responseText').value = '';
+          document.getElementById('wordCount').textContent = 'Words: 0';
+        }
+        setStatus(submittedMessage(), false);
+      };
+      const done = () => { document.getElementById('submitBtn').disabled = !WRITING_OPEN; };
 
       google.script.run
         .withSuccessHandler(res=>{
-          if (res && res.ok) {
-            document.getElementById('responseText').value = '';
-            setStatus(submittedMessage(), false);
-          } else {
-            setStatus(res && res.error ? res.error : 'Submission failed.', true);
-          }
-          document.getElementById('submitBtn').disabled = !WRITING_OPEN;
+          if (res && res.ok) submitted();
+          else setStatus(res && res.error ? res.error : 'Submission failed.', true);
+          done();
         })
         .withFailureHandler(err=>{
+          // Math answers can't go through the older text-only API: show the error instead
+          // (e.g. too many lines), keeping what the student typed.
+          if (payload.math) {
+            setStatus(String(err && err.message ? err.message : err), true);
+            done();
+            return;
+          }
           google.script.run
             .withSuccessHandler(res2=>{
-              if (res2 && res2.ok) {
-                document.getElementById('responseText').value = '';
-                setStatus(submittedMessage(), false);
-              } else {
-                setStatus(res2 && res2.error ? res2.error : 'Submission failed.', true);
-              }
-              document.getElementById('submitBtn').disabled = !WRITING_OPEN;
+              if (res2 && res2.ok) submitted();
+              else setStatus(res2 && res2.error ? res2.error : 'Submission failed.', true);
+              done();
             })
             .withFailureHandler(err2=>{
               setStatus(String(err2), true);
-              document.getElementById('submitBtn').disabled = !WRITING_OPEN;
+              done();
             })
             .submitResponse(text, reviewerToken, '', SESSION_ID, INSTRUCTOR_ID, conf);
         })

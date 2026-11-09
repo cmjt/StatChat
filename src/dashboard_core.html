@@ -59,6 +59,12 @@
     function flagBadgeHTML(flagged){
       return flagged ? '<span class="badge flag" title="Contains a term from ProfanityList">⚠ Flagged</span> ' : '';
     }
+    // The text part of a response: the instructor's edit, else what the student wrote.
+    // (The server sends it as r.text; equations, for math activities, are in r.math.)
+    function responseText(r){
+      return (r && r.text !== undefined) ? String(r.text || '')
+        : String((r && (r.response_text_edited || r.response_text_original)) || '');
+    }
     function confidenceBadgeHTML(conf){
       const n = Number(conf || 0);
       if (!n || n < 1 || n > 5) return '';
@@ -103,8 +109,12 @@
       const pw = document.getElementById('instPw').value || ''; // not trimmed: spaces may be part of the password
       const sessionId = (document.getElementById('newSessionId').value || '').trim();
       const duration_mins = Math.min(1440, Math.max(1, parseInt(document.getElementById('sessionDuration').value, 10) || 60));
-      const presetEl = document.querySelector('input[name="preset"]:checked');
-      const preset = presetEl ? presetEl.value : 'respond';
+      const typeEl = document.querySelector('input[name="submissionType"]:checked');
+      const peerEl = document.querySelector('input[name="peerReview"]:checked');
+      const activity = {
+        submission_type: typeEl ? typeEl.value : 'text',
+        peer_review: !!(peerEl && peerEl.value === 'true'),
+      };
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
       if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
@@ -139,7 +149,7 @@
                 msg.textContent = 'Start failed: ' + (err && err.message ? err.message : err);
                 btn.disabled = false;
               })
-              .apiStartSession(AUTH_TOKEN, sessionId, duration_mins, preset);
+              .apiStartSession(AUTH_TOKEN, sessionId, duration_mins, activity);
           } else {
             msg.style.color = '#c00';
             msg.textContent = (loginRes && loginRes.error) || 'Invalid login.';
@@ -341,7 +351,9 @@
         );
 
         rows.forEach(r => {
-          const raw = String(r.response_text_edited || r.response_text_original || '').trim();
+          // Math responses are tallied by their last line (the final answer), spaces ignored
+          const lastEq = (Array.isArray(r.math) && r.math.length) ? String(r.math[r.math.length - 1]).replace(/\s+/g, '') : '';
+          const raw = lastEq || responseText(r).trim();
           if (!raw) return;
           const first = raw.split(/\s+/)[0] || '';
           if (!first) return;
@@ -357,6 +369,7 @@
       const listView = document.getElementById('listView');
       if (!listView) return;
 
+      syncMathDrafts();   // keep corrections in progress across the re-render
       listView.innerHTML = '';
       const w = listView.clientWidth || window.innerWidth;
       const cols = (w < 640) ? 1 : (w < 960 ? 2 : 3);
@@ -372,7 +385,7 @@
         .sort((a,b) => (Number(b.order_weight)||0) - (Number(a.order_weight)||0));
 
       rows.forEach((r)=>{
-        const txt = String(r.response_text_edited || r.response_text_original || '');
+        const txt = responseText(r);
         const card = document.createElement('div');
         card.className = 'card';
         card.setAttribute('data-response-id', String(r.response_id));  // fast lookup for addTagExclusive
@@ -453,9 +466,10 @@
             </span>
           </div>
 
-          <div contenteditable="true" onblur="saveEdit('${r.response_id}', this.textContent)">
+          ${(txt || !hasMath(r)) ? `<div contenteditable="true" onblur="saveEdit('${r.response_id}', this.textContent)">
             ${escapeHtml(txt)}
-          </div>
+          </div>` : ''}
+          ${hasMath(r) ? '<div class="mathSlot"></div>' : ''}
 
           <!-- Collapse toggle button -->
           <div style="margin-top:6px; display:flex; align-items:center; gap:4px;">
@@ -472,6 +486,8 @@
           <!-- Reviews block (only when review is open, persistent open/closed) -->
           ${reviewsHTML}
         `;
+
+        if (hasMath(r)) renderMathSlot(card.querySelector('.mathSlot'), r);
 
         const collapseBtn = card.querySelector('.collapseBtn');
         const collapsible = card.querySelector('.collapsibleSection');
@@ -686,13 +702,125 @@
     function saveEdit(id, text){
       const r = RESPONSES.find(x => String(x.response_id) === String(id));
       const next = String(text || '').trim();
-      const current = r ? String(r.response_text_edited || r.response_text_original || '').trim() : null;
+      const current = r ? responseText(r).trim() : null;
       if (current !== null && next === current) return; // unchanged: don't write
-      if (r) r.response_text_edited = next;              // keep the local model in sync
+      if (r) { r.response_text_edited = next; r.text = next; } // keep the local model in sync
       google.script.run
         .withSuccessHandler(()=>{ /* picked up on next Refresh */ })
         .withFailureHandler(err=>{ alert('Save failed: ' + (err && err.message ? err.message : err)); })
         .apiUpdateResponse(AUTH_TOKEN, id, { response_text_edited: next });
+    }
+    // --- Correcting equations (math activities) ---
+    // Click a card's equations to edit them in the MathLive editor. The correction is shown
+    // instead of the student's equations everywhere; the submission itself is kept, and
+    // "Revert" goes back to it. Edits in progress live in MATH_EDITS and survive re-renders.
+    const MATH_EDITS = Object.create(null);   // { [response_id]: { lines: [latex], fields: [inputs] } }
+    function hasMath(r){ return !!(r && Array.isArray(r.math) && r.math.length); }
+    function syncMathDrafts(){
+      Object.keys(MATH_EDITS).forEach(rid => {
+        const d = MATH_EDITS[rid];
+        if (d.fields && d.fields.length) d.lines = d.fields.map(f => String(f.value || ''));
+      });
+    }
+    function findResponse(rid){ return RESPONSES.find(x => String(x.response_id) === String(rid)); }
+
+    /** Fill a card's equation area: the rendered equations, or the editor while correcting */
+    function renderMathSlot(slot, r){
+      if (!slot) return;
+      const rid = String(r.response_id);
+      const draft = MATH_EDITS[rid];
+      slot.innerHTML = '';
+      slot.onclick = null;
+      if (!draft) {
+        slot.className = 'mathSlot mathView';
+        slot.title = 'Click to correct these equations';
+        slot.innerHTML = mathBlockHTML(r.math)
+          + (r.corrected ? '<span class="badge corrected" title="You corrected this answer. Click to edit or revert.">✎ Corrected</span>' : '');
+        slot.onclick = () => startMathEdit(slot, r);
+        return;
+      }
+      slot.className = 'mathSlot mathEditor';
+      slot.title = '';
+      if (MATHLIVE_STATE !== 'ready' && MATHLIVE_STATE !== 'failed') {
+        slot.innerHTML = '<div class="small">Loading the equation editor…</div>';
+        return;
+      }
+      draft.fields = [];
+      const lines = document.createElement('div');
+      slot.appendChild(lines);
+      const addRow = (value) => {
+        const row = document.createElement('div');
+        row.className = 'mathRow';
+        const field = createMathInput('Equation line ' + (draft.fields.length + 1));
+        const remove = document.createElement('button');
+        remove.type = 'button'; remove.className = 'mathRemove'; remove.textContent = '✕'; remove.title = 'Remove this line';
+        remove.addEventListener('click', () => {
+          syncMathDrafts();
+          const i = draft.fields.indexOf(field);
+          if (i >= 0) draft.lines.splice(i, 1);
+          if (!draft.lines.length) draft.lines.push('');
+          renderMathSlot(slot, r);
+        });
+        row.appendChild(field); row.appendChild(remove);
+        lines.appendChild(row);
+        field.value = value;
+        draft.fields.push(field);
+      };
+      draft.lines.forEach(addRow);
+
+      const bar = document.createElement('div');
+      bar.className = 'mathEditBar';
+      const button = (label, title, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'mathEditBtn'; b.textContent = label; b.title = title;
+        b.addEventListener('click', onClick);
+        bar.appendChild(b);
+        return b;
+      };
+      const status = document.createElement('span');
+      status.className = 'small mathEditStatus';
+      button('＋ Line', 'Add an equation line', () => {
+        syncMathDrafts();
+        if (draft.lines.length >= 10) { status.textContent = 'At most 10 lines.'; return; }
+        draft.lines.push(''); renderMathSlot(slot, r);
+      });
+      button('Save', 'Save the corrected equations', () => saveMathEdit(slot, r, status));
+      button('Cancel', 'Discard these changes', () => { delete MATH_EDITS[rid]; renderMathSlot(slot, r); });
+      if (r.corrected) button("Revert to student's answer", 'Remove your correction and show what the student submitted', () => revertMathEdit(slot, r, status));
+      bar.appendChild(status);
+      slot.appendChild(bar);
+    }
+    function startMathEdit(slot, r){
+      const rid = String(r.response_id);
+      if (MATH_EDITS[rid]) return;
+      MATH_EDITS[rid] = { lines: r.math.slice(), fields: [] };
+      renderMathSlot(slot, r);
+      loadMathLive(() => { if (MATH_EDITS[rid]) renderMathSlot(slot, r); });
+    }
+    function applyMathResult(slot, r, res){
+      const local = findResponse(r.response_id) || r;
+      local.math = res.math; local.corrected = !!res.corrected;
+      delete MATH_EDITS[String(r.response_id)];
+      renderMathSlot(slot, local);
+    }
+    function saveMathEdit(slot, r, status){
+      syncMathDrafts();
+      const draft = MATH_EDITS[String(r.response_id)];
+      const lines = draft.lines.map(l => String(l).trim()).filter(Boolean);
+      if (!lines.length) { status.textContent = 'Add at least one equation (to remove the answer, hide the card).'; return; }
+      status.textContent = 'Saving…';
+      google.script.run
+        .withSuccessHandler(res => applyMathResult(slot, r, res))
+        .withFailureHandler(err => { status.textContent = 'Save failed: ' + (err && err.message ? err.message : err); })
+        .apiUpdateResponse(AUTH_TOKEN, r.response_id, { math_edited: lines });
+    }
+    function revertMathEdit(slot, r, status){
+      if (!confirm("Remove your correction and show the student's own answer again?")) return;
+      status.textContent = 'Reverting…';
+      google.script.run
+        .withSuccessHandler(res => applyMathResult(slot, r, res))
+        .withFailureHandler(err => { status.textContent = 'Revert failed: ' + (err && err.message ? err.message : err); })
+        .apiUpdateResponse(AUTH_TOKEN, r.response_id, { math_edited: null });
     }
     function savePosition(id, x, y){
       google.script.run

@@ -1,0 +1,83 @@
+  <!-- student_math: the answer box for math activities: equation lines (MathLive editor,
+       plain LaTeX boxes as fallback). The loader and inputs are in math_render. -->
+  <script>
+    const MATH_LINES_MAX = 10;          // the server enforces the same limit
+    let MATH_EDITOR = '';               // '' (not started) | 'loading' | 'mathlive' | 'plain'
+    let MATH_FIELDS = [];               // [{ row, field, remove }]; field.value is the LaTeX
+    let MATH_ENABLED = false;
+
+    function isMathActivity(){ return !!(SETTINGS && SETTINGS.submission_type === 'math'); }
+    function setMathHelp(msg){ document.getElementById('mathHelp').textContent = msg; }
+
+    /** Math activities replace the text box with equation lines; called from applyPhaseUI */
+    function updateMathUI(canWrite){
+      const math = isMathActivity();
+      const show = !!SESSION_ID && CURRENT_PHASE !== 'review' && math;
+      document.getElementById('textSection').style.display = math ? 'none' : 'block';
+      document.getElementById('mathSection').style.display = show ? 'block' : 'none';
+      if (show) ensureMathEditor();
+      setMathEnabled(show && canWrite);
+    }
+
+    function ensureMathEditor(){
+      if (MATH_EDITOR) return;
+      MATH_EDITOR = 'loading';
+      setMathHelp('Loading the equation editor…');
+      loadMathLive(mathEditorReady);
+    }
+
+    function mathEditorReady(ok){
+      MATH_EDITOR = ok ? 'mathlive' : 'plain';
+      setMathHelp(ok
+        ? (isTouchDevice() ? 'Tap a line to open the maths keyboard. One step of your working per line.'
+                           : 'Type maths directly, e.g. / for a fraction, ^ for a power. One step of your working per line.')
+        : 'The equation editor could not load. Type LaTeX instead, e.g. \\frac{a}{b} or \\bar{x} = 4.2');
+      if (!MATH_FIELDS.length) addMathLine();
+      setMathEnabled(MATH_ENABLED);
+    }
+
+    function addMathLine(){
+      if (MATH_EDITOR !== 'mathlive' && MATH_EDITOR !== 'plain') return;
+      if (MATH_FIELDS.length >= MATH_LINES_MAX) { setStatus(`You can add up to ${MATH_LINES_MAX} lines.`, true); return; }
+      const row = document.createElement('div');
+      row.className = 'mathRow';
+      const field = createMathInput('Equation line ' + (MATH_FIELDS.length + 1));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'mathRemove';
+      remove.textContent = '✕';
+      remove.title = 'Remove this line';
+      const entry = { row, field, remove };
+      remove.addEventListener('click', () => removeMathLine(entry));
+      row.appendChild(field);
+      row.appendChild(remove);
+      document.getElementById('mathLines').appendChild(row);
+      MATH_FIELDS.push(entry);
+      setMathEnabled(MATH_ENABLED);
+      return entry;
+    }
+    function removeMathLine(entry){
+      document.getElementById('mathLines').removeChild(entry.row);
+      MATH_FIELDS = MATH_FIELDS.filter(e => e !== entry);
+      if (!MATH_FIELDS.length) addMathLine();   // always keep one line to type in
+    }
+
+    /** The equations the student has typed, as LaTeX (blank lines dropped) */
+    function getMathLines(){
+      return MATH_FIELDS.map(e => String(e.field.value || '').trim()).filter(Boolean);
+    }
+
+    /** After a successful submit: back to one empty line */
+    function clearMathLines(){
+      MATH_FIELDS.slice().forEach(e => document.getElementById('mathLines').removeChild(e.row));
+      MATH_FIELDS = [];
+      addMathLine();
+    }
+
+    function setMathEnabled(on){
+      MATH_ENABLED = !!on;
+      const ready = MATH_EDITOR === 'mathlive' || MATH_EDITOR === 'plain';
+      MATH_FIELDS.forEach(e => { e.field.disabled = !MATH_ENABLED; e.remove.disabled = !MATH_ENABLED; });
+      document.getElementById('addMathBtn').disabled = !(MATH_ENABLED && ready);
+    }
+  </script>

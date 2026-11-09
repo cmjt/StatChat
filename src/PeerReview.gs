@@ -12,19 +12,19 @@ function requiredReviews_(session) {
   return Math.max(1, parseInt(session && session.peer_required_reviews, 10) || DEFAULT_REVIEWS_PER_STUDENT);
 }
 
-/** Visible (not hidden) responses in a session, in sheet order: [{response_id, author, text}] */
+/** Visible (not hidden) responses in a session, in sheet order: [{response_id, author, text, math}] */
 function visibleResponses_(session_id) {
   const { header: hdr, rows } = readTable(getResponsesSheet());
   const idx = (name)=>{ const i = hdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in Responses.`); return i; };
   const sCol = idx('session_id'), hidCol = idx('is_hidden'), uidCol = idx('reviewer_token'),
-        idCol = idx('response_id'), txtECol = idx('response_text_edited'), txtOCol = idx('response_text_original');
+        idCol = idx('response_id'), txtECol = idx('response_text_edited'), txtOCol = idx('response_text_original'),
+        cCol = hdr.indexOf('response_content');
   return rows
     .filter(r => sameId_(r[sCol], session_id) && String(r[hidCol] || 'FALSE').toLowerCase() !== 'true')
-    .map(r => ({
-      response_id: String(r[idCol] || ''),
-      author: String(r[uidCol] || '').trim(),
-      text: String(r[txtECol] || '') || String(r[txtOCol] || '')
-    }));
+    .map(r => {
+      const parts = responseParts_(r[txtECol], r[txtOCol], cCol >= 0 ? r[cCol] : '');
+      return { response_id: String(r[idCol] || ''), author: String(r[uidCol] || '').trim(), text: parts.text, math: parts.math };
+    });
 }
 
 /** All response_ids assigned to this reviewer in this session, in assignment order */
@@ -483,7 +483,7 @@ function apiGetMyFeedback(session_id, reviewer_token) {
   if (!reviewProgress_(session_id, token, visible).allDone) return locked;
 
   // This student's own visible responses
-  const mine = new Map(visible.filter(v => v.author === token).map(v => [v.response_id, v.text]));
+  const mine = new Map(visible.filter(v => v.author === token).map(v => [v.response_id, v]));
 
   const { header: fHdr, rows: fRows } = readTable(getPeerFeedbackSheet());
   const fIdx = (name)=>{ const i = fHdr.indexOf(name); if (i===-1) throw new Error(`Missing ${name} in PeerFeedback.`); return i; };
@@ -495,7 +495,8 @@ function apiGetMyFeedback(session_id, reviewer_token) {
                  (hCol === -1 || String(r[hCol] || 'FALSE').toLowerCase() !== 'true'))
     .map(r => ({
       response_id: String(r[rCol]),
-      response_text: mine.get(String(r[rCol])),
+      response_text: mine.get(String(r[rCol])).text,
+      response_math: mine.get(String(r[rCol])).math,
       feedback: String(r[tCol] || ''),
       timestamp: String(r[tsCol] || '')
     }));

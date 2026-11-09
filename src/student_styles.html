@@ -55,6 +55,17 @@
       font-size:12px;
       min-height:auto;
     }
+    /* Equation lines (math activities) */
+    .mathRow { display:flex; gap:6px; align-items:center; margin-top:6px; }
+    .mathRow math-field, .mathRow .mathPlain {
+      flex:1; min-width:0; font-size:1.25rem; padding:6px 8px;
+      border:1px solid var(--border); border-radius:6px; background:#fff;
+    }
+    .mathRow .mathPlain { font-size:1rem; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .mathRow math-field[disabled], .mathRow .mathPlain:disabled { background:#f3f4f6; }
+    .mathRemove { border:1px solid var(--border); background:#fff; border-radius:6px; padding:6px 9px; cursor:pointer; color:#555; }
+    .mathRemove:disabled { opacity:0.5; cursor:default; }
+    #addMathBtn { margin-top:8px; font-size:0.95rem; }
     .btn-view:hover {
       background-color: var(--sta-blue-hover);
     }

@@ -6,6 +6,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <?!= include('student_styles') ?>
+  <?!= include('math_render') ?>
 </head>
 <body>
   <div class="container">
@@ -32,9 +33,20 @@
     <!-- Response -->
     <div style="margin-top:10px;">
       <div id="modeNote" class="small" style="margin-bottom:6px; display:none;"></div>
-      <label for="responseText">Your response</label>
-      <textarea id="responseText" placeholder="Write your answer…" disabled></textarea>
-      <div class="small" id="wordCount" style="margin-top:6px;">Words: 0</div>
+      <!-- Text answer: hidden in math activities -->
+      <div id="textSection">
+        <label for="responseText">Your response</label>
+        <textarea id="responseText" placeholder="Write your answer…" disabled></textarea>
+        <div class="small" id="wordCount" style="margin-top:6px;">Words: 0</div>
+      </div>
+    </div>
+
+    <!-- Equation lines: replace the text answer in math activities -->
+    <div id="mathSection" style="display:none; margin-top:10px;">
+      <label>Your answer</label>
+      <div class="small" id="mathHelp"></div>
+      <div id="mathLines"></div>
+      <button type="button" id="addMathBtn" class="btn btn-view btn-small" onclick="addMathLine()" disabled>＋<span class="btn-label">Add line</span></button>
     </div>
     
     <!-- Confidence buttons -->
@@ -96,6 +108,7 @@
 
   <script>const SERVER_INST = '<?= inst ?>';</script>
   <?!= include('student_core') ?>
+  <?!= include('student_math') ?>
   <?!= include('student_peer') ?>
   <script>init();</script>
 </body>

@@ -1,0 +1,89 @@
+  <!-- math_render: shared by student.html and dashboard.html. Displays equations (LaTeX) with
+       KaTeX, showing the source if KaTeX can't load, and loads the MathLive editor on demand. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <style>
+    .mathBlock { margin-top: 6px; }
+    .mathLine { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+    .mathLine .katex-display { margin: 4px 0; text-align: left; }
+    .mathLine .katex-display > .katex { text-align: left; }
+    .mathSource { font-family: ui-monospace, Menlo, Consolas, monospace; color: #555; white-space: pre-wrap; }
+  </style>
+  <script>
+    function mathEscape_(s){
+      return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+    /** HTML for one equation. KaTeX with trust:false is safe for students' input; limits stop
+     *  huge or runaway macros. Falls back to the escaped source if KaTeX isn't available. */
+    function mathLineHTML(latex){
+      if (window.katex) {
+        try {
+          return '<div class="mathLine">' + katex.renderToString(String(latex), {
+            displayMode: true, throwOnError: false, trust: false, maxSize: 20, maxExpand: 300
+          }) + '</div>';
+        } catch (e) { /* fall through to the source */ }
+      }
+      return '<div class="mathLine mathSource">' + mathEscape_(latex) + '</div>';
+    }
+    // --- MathLive editor, downloaded only when an editor is first needed ---
+    // If it can't load (blocked CDN, slow network), callers fall back to plain LaTeX boxes.
+    const MATHLIVE_SRC = 'https://cdn.jsdelivr.net/npm/mathlive@0.101.2/dist/mathlive.min.js';
+    const MATHLIVE_TIMEOUT_MS = 15000;
+    let MATHLIVE_STATE = '';            // '' | 'loading' | 'ready' | 'failed'
+    const MATHLIVE_WAITING = [];
+
+    /** Calls cb(true) once MathLive is ready, or cb(false) if it couldn't load */
+    function loadMathLive(cb){
+      if (MATHLIVE_STATE === 'ready' || MATHLIVE_STATE === 'failed') { cb(MATHLIVE_STATE === 'ready'); return; }
+      MATHLIVE_WAITING.push(cb);
+      if (MATHLIVE_STATE === 'loading') return;
+      if (window.customElements && customElements.get('math-field')) { mathLiveLoaded(true); return; }
+      MATHLIVE_STATE = 'loading';
+      const s = document.createElement('script');
+      s.src = MATHLIVE_SRC;
+      const timer = setTimeout(() => mathLiveLoaded(false), MATHLIVE_TIMEOUT_MS);
+      s.onload = () => { clearTimeout(timer); mathLiveLoaded(!!(window.customElements && customElements.get('math-field'))); };
+      s.onerror = () => { clearTimeout(timer); mathLiveLoaded(false); };
+      (document.head || document.body).appendChild(s);
+    }
+    /** Only the first result counts, so a late load after the timeout doesn't swap editors */
+    function mathLiveLoaded(ok){
+      if (MATHLIVE_STATE === 'ready' || MATHLIVE_STATE === 'failed') return;
+      MATHLIVE_STATE = ok ? 'ready' : 'failed';
+      if (ok && window.MathfieldElement) MathfieldElement.soundsDirectory = null;  // no key clicks in class
+      MATHLIVE_WAITING.splice(0).forEach(cb => cb(ok));
+    }
+    function isTouchDevice(){
+      try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; }
+    }
+    /** One equation input: a MathLive math-field, or a plain LaTeX box if MathLive failed.
+     *  Set .value after adding it to the page; .value is always the LaTeX. */
+    function createMathInput(label){
+      let field;
+      if (MATHLIVE_STATE === 'ready') {
+        field = document.createElement('math-field');
+        // Apps Script shows pages inside iframes. By default MathLive would put its keyboard in
+        // the top-level (Google's) page, where it never appears; 'sandboxed' keeps it in ours.
+        field.setAttribute('math-virtual-keyboard-policy', 'sandboxed');
+        field.addEventListener('focusin', () => {
+          if (isTouchDevice() && window.mathVirtualKeyboard) window.mathVirtualKeyboard.show();
+        });
+      } else {
+        field = document.createElement('input');
+        field.type = 'text';
+        field.className = 'mathPlain';
+        field.placeholder = 'LaTeX, e.g. \\frac{a}{b}';
+        field.setAttribute('autocapitalize', 'off');
+        field.setAttribute('spellcheck', 'false');
+      }
+      if (label) field.setAttribute('aria-label', label);
+      return field;
+    }
+
+    /** HTML for a response's equations, or '' if it has none */
+    function mathBlockHTML(lines){
+      return (Array.isArray(lines) && lines.length)
+        ? '<div class="mathBlock">' + lines.map(mathLineHTML).join('') + '</div>'
+        : '';
+    }
+  </script>

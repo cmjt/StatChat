@@ -9,20 +9,54 @@ then (optionally) review each other's answers.
 
 ## Activities
 
-When opening a session, the instructor picks an activity:
+When opening a session, the instructor answers two questions:
 
-| Activity | Students submit | Peer review |
-|---|---|---|
-| **Quick response** | Short text answers or poll replies, shown live as cards and charts | Off: peer review controls are hidden |
-| **Peer review** | Text answers, then review classmates' answers | On: the instructor opens the review when ready |
+| Question | Choices |
+|---|---|
+| **Students submit** | **Text**: short written answers or poll replies. **Math**: typed equations only, with no text box |
+| **Peer review** | **Off**: responses are shown live as cards and charts, and peer review controls are hidden. **On**: after writing, students review classmates' answers when the instructor opens the review |
 
-Behind the presets, each session stores two settings in Sessions:
-`submission_type` (`text` for now; `sketch` is planned) and `peer_review`
-(`TRUE`/`FALSE`). Both columns are added automatically. The server enforces
-them: peer review can't be opened in a quick-response session. Logging in again
-with a different activity changes it, except while the session is in peer
-review. Sessions created before activities existed behave as peer review
-sessions, as they did before.
+The activity is named from the answers: *Quick response*, *Peer review*,
+*Quick response · math* or *Peer review · math*.
+
+Each session stores the answers in two Sessions columns, `submission_type`
+(`text` or `math`; `sketch` is planned) and `peer_review` (`TRUE`/`FALSE`).
+Both columns are added automatically. The server enforces them: peer review
+can't be opened when it's off, a math activity accepts equations only, and a
+text activity accepts text only. Logging in again with different answers changes
+them, except while the session is in peer review. Sessions created before
+activities existed behave as text with peer review, as they did before.
+
+### Math activities
+
+Students' text box is replaced by **equation lines**: one equation per line, up
+to 10, which they can add or remove (for example, one step of working per line).
+
+- **Equation editor:** [MathLive](https://cortexjs.io/mathlive/). Students type
+  maths directly (`/` for a fraction, `^` for a power) or use its on-screen
+  maths keyboard, which opens when they tap a line on a phone or tablet. It's
+  only downloaded when a math activity starts. If it can't load, students get
+  plain boxes to type LaTeX into.
+- **Display:** equations are shown with [KaTeX](https://katex.org/) on the
+  dashboard cards and in peer review. If KaTeX can't load, the LaTeX source is
+  shown instead.
+- **Correcting answers:** click a card's equations on the dashboard to edit
+  them in the same editor, then **Save**. As with text edits, the correction is
+  shown instead of the student's answer everywhere (the board, peer review, and
+  the feedback the student receives), and the card gets a **✎ Corrected**
+  badge. The student's own submission is kept: **Revert to student's answer**
+  brings it back. To remove an answer, hide the card.
+- **Storage:** equations are stored as LaTeX in the `response_content` column
+  of Responses (added automatically), as JSON:
+  `{"math": ["\\bar{x} = 4.2", ...], "math_edited": [...]}`. `math` is what
+  the student submitted and never changes; `math_edited` is your correction, if
+  any. `response_text_original` also gets a readable copy of the submission,
+  with each equation as `$$...$$`.
+- **Poll view:** math answers are tallied by their last line (the final
+  answer), ignoring spaces.
+- **Profanity:** equations can't be masked without breaking them, so a listed
+  term inside one is blocked (with `profanity_action` = `block`) or otherwise
+  flagged.
 
 **Students' pages update themselves.** They re-check every 20–30 seconds
 (randomised so a class's requests are spread out), pause while the tab is
@@ -45,9 +79,10 @@ src/                  Everything deployed to Apps Script (clasp's rootDir)
   Profanity.gs        Profanity list, masking, detection
   Web.gs              doGet/doPost and include() for HTML partials
   student.html        Student page: markup, pulls in the partials below
-  student_styles.html / student_core.html / student_peer.html
+  student_styles.html / student_core.html / student_math.html / student_peer.html
   dashboard.html      Instructor dashboard: markup, pulls in the partials below
   dashboard_styles.html / dashboard_core.html / dashboard_peer.html
+  math_render.html    Shows equations (KaTeX) and loads the equation editor (MathLive); used by both pages
 tests/                Local tests (not deployed)
 ```
 
@@ -236,6 +271,7 @@ Recommended columns:
 - is_pinned
 - profanity_flag — `NONE`, `MASKED` or `FLAGGED`
 - phase_at_submit
+- response_content — equations for math activities, and your corrections, as JSON (added automatically; see [Math activities](#math-activities))
 
 ---
 

@@ -11,17 +11,22 @@ function FakeEl(id) {
                      toggle: (c, on) => { if (on === undefined ? !classes.has(c) : on) classes.add(c); else classes.delete(c); } };
 }
 FakeEl.prototype.addEventListener = function () {};
-FakeEl.prototype.appendChild = function (c) { this.children.push(c); return c; };
+FakeEl.prototype.appendChild = function (c) { this.children.push(c); c.parentNode = this; return c; };
+FakeEl.prototype.removeChild = function (c) { this.children = this.children.filter(x => x !== c); c.parentNode = null; return c; };
+FakeEl.prototype.setAttribute = function (k, v) { (this.attrs = this.attrs || {})[k] = String(v); };
 FakeEl.prototype.closest = function () { return null; };
+FakeEl.prototype.getBoundingClientRect = function () { return { left: 0, top: 0, width: 1000, height: 800 }; };
 FakeEl.prototype.focus = function () {};
-FakeEl.prototype.querySelector = function () { return null; };
+// Elements inside a card (found by selector): one stand-in per selector, so card code runs
+FakeEl.prototype.querySelector = function (sel) { const q = (this.__q = this.__q || {}); return (q[sel] = q[sel] || new FakeEl(sel)); };
 FakeEl.prototype.querySelectorAll = function () { return []; };
 
 const __docListeners = {};
 const document = {
   hidden: false, activeElement: null,
   getElementById: id => (__elements[id] = __elements[id] || new FakeEl(id)),
-  createElement: () => new FakeEl(''),
+  createElement: tag => Object.assign(new FakeEl(''), { tagName: String(tag).toUpperCase() }),
+  head: new FakeEl('head'),
   querySelector: () => null,
   querySelectorAll: () => [],
   addEventListener: (type, fn) => { (__docListeners[type] = __docListeners[type] || []).push(fn); },

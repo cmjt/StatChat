@@ -56,24 +56,48 @@ function parseDeadline_(iso) {
 }
 
 // ===== Activity settings =====
-// Each session has two settings, chosen at login via a preset:
-//   submission_type: what students submit ('text'; 'sketch' is added in a later step)
+// Each session has two settings, chosen at login:
+//   submission_type: what students submit: 'text', or 'math' (typed equations only)
 //   peer_review:     whether the session can have a peer review phase
-// Presets are what instructors see; the server only reasons about the two settings.
+// The server only reasons about these two settings. PRESETS are the older single-choice
+// names, still accepted by apiStartSession.
+const SUBMISSION_TYPES = {
+  text: { label_suffix: '' },
+  math: { label_suffix: ' · math' },
+};
 const PRESETS = {
   respond: { label: 'Quick response', submission_type: 'text', peer_review: false },
   peer:    { label: 'Peer review',    submission_type: 'text', peer_review: true  },
 };
 const DEFAULT_PRESET = 'respond';
 
+/** Activity name shown to instructors and students, e.g. "Quick response" or "Peer review · math" */
+function activityLabel_(submission_type, peer_review) {
+  return (peer_review ? 'Peer review' : 'Quick response') + SUBMISSION_TYPES[submission_type].label_suffix;
+}
+
+/** The activity chosen at login: a preset name ('respond' | 'peer') or
+ *  { submission_type, peer_review }. Returns { submission_type, peer_review } or throws. */
+function resolveActivity_(activity) {
+  if (activity && typeof activity === 'object') {
+    const type = String(activity.submission_type || 'text').trim().toLowerCase();
+    if (!SUBMISSION_TYPES[type]) throw new Error('Unknown submission type: ' + activity.submission_type);
+    return { submission_type: type, peer_review: prBool(activity.peer_review) };
+  }
+  const key = String(activity || DEFAULT_PRESET).trim().toLowerCase();
+  if (!PRESETS[key]) throw new Error('Unknown activity type: ' + activity);
+  return { submission_type: PRESETS[key].submission_type, peer_review: PRESETS[key].peer_review };
+}
+
 /** A session's activity settings. Sessions created before settings existed have blank
- *  cells: they're treated as text with peer review allowed (how the app used to work). */
+ *  cells: they're treated as text with peer review allowed (how the app used to work).
+ *  preset is 'respond' or 'peer' (the peer review choice); label is the activity name. */
 function getSessionSettings_(session) {
   const type = String((session && session.submission_type) || '').trim().toLowerCase() || 'text';
   const rawPeer = session ? session.peer_review : '';
   const peer = (rawPeer === '' || rawPeer === undefined || rawPeer === null) ? true : prBool(rawPeer);
-  const preset = Object.keys(PRESETS).find(k => PRESETS[k].submission_type === type && PRESETS[k].peer_review === peer) || '';
-  return { submission_type: type, peer_review: peer, preset, label: preset ? PRESETS[preset].label : 'Custom' };
+  if (!SUBMISSION_TYPES[type]) return { submission_type: type, peer_review: peer, preset: '', label: 'Custom' };
+  return { submission_type: type, peer_review: peer, preset: peer ? 'peer' : 'respond', label: activityLabel_(type, peer) };
 }
 
 // ===== Student view cache =====
@@ -97,16 +121,15 @@ function getPhaseForSession(session) {
 
 // All functions here take a login token (from apiInstructorLogin) as their first argument.
 
-/** Start (or reopen) a session with an activity preset ('respond' | 'peer').
- *  A session in its peer review phase keeps its settings, so a review isn't stranded. */
-function apiStartSession(token, session_id, duration_mins, preset){
+/** Start (or reopen) a session. activity is { submission_type, peer_review } or a preset
+ *  name ('respond' | 'peer'). A session in its peer review phase keeps its settings, so a
+ *  review isn't stranded. */
+function apiStartSession(token, session_id, duration_mins, activity){
   const instructor_id = requireInstructor_(token);
   const inst = getInstructorById_(instructor_id);
   if (!inst) throw new Error('Instructor not found.');
   if (!String(session_id || '').trim()) throw new Error('Enter a session ID.');
-  const presetKey = String(preset || DEFAULT_PRESET).trim().toLowerCase();
-  if (!PRESETS[presetKey]) throw new Error('Unknown activity type: ' + preset);
-  const chosen = PRESETS[presetKey];
+  const chosen = resolveActivity_(activity);
 
   const sh = getSheetByName(SHEET_SESSIONS);
   ensureHeaderColumn_(sh, 'submission_type');

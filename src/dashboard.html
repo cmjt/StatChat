@@ -6,6 +6,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <?!= include('dashboard_styles') ?>
+  <?!= include('math_render') ?>
 </head>
 <body>
 
@@ -30,14 +31,25 @@
           <input id="newSessionId" placeholder="e.g., week_01_lec_02" style="flex:1;">
         </div>
         <fieldset class="presetPicker">
-          <legend>Activity</legend>
+          <legend>Students submit</legend>
           <label class="presetOption">
-            <input type="radio" name="preset" value="respond" checked>
-            <span><b>Quick response</b><br><small>Students write short answers or poll replies. You see them live as cards and charts.</small></span>
+            <input type="radio" name="submissionType" value="text" checked>
+            <span><b>Text</b><br><small>Short written answers or poll replies.</small></span>
           </label>
           <label class="presetOption">
-            <input type="radio" name="preset" value="peer">
-            <span><b>Peer review</b><br><small>Students write, then review classmates' answers. You open the review when ready.</small></span>
+            <input type="radio" name="submissionType" value="math">
+            <span><b>Math</b><br><small>Typed equations only (no text), using an equation editor with a maths keyboard on phones and tablets. Click an answer on the board to correct it.</small></span>
+          </label>
+        </fieldset>
+        <fieldset class="presetPicker">
+          <legend>Peer review</legend>
+          <label class="presetOption">
+            <input type="radio" name="peerReview" value="false" checked>
+            <span><b>Off</b><br><small>You see responses live as cards and charts.</small></span>
+          </label>
+          <label class="presetOption">
+            <input type="radio" name="peerReview" value="true">
+            <span><b>On</b><br><small>After writing, students review classmates' answers. You open the review when ready.</small></span>
           </label>
         </fieldset>
         <div class="row" style="margin-top:8px;">

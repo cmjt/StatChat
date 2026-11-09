@@ -31,22 +31,92 @@ function writeResponse_(payload) {
   });
 }
 
-/** Student submission: disabled during review; poll no longer enforced */
+// Math responses (math activities): up to MATH_MAX_LINES equations of LaTeX, at most
+// MATH_MAX_LINE_CHARS each, kept as JSON in the response_content column:
+//   {"math": ["\\bar{x} = 4.2", ...], "math_edited": [...]}
+// math is what the student submitted and never changes; math_edited is the instructor's
+// correction, shown instead of it everywhere (like response_text_edited for text).
+// response_text_original also gets a readable copy of the submission ($$...$$ per line).
+// Rows from before math activities were maths-only may also have "text".
+const MATH_MAX_LINES = 10;
+const MATH_MAX_LINE_CHARS = 1000;
+
+/** Trimmed, non-blank equation lines, or throws if there are too many or one is too long */
+function cleanMathLines_(lines) {
+  const math = (Array.isArray(lines) ? lines : []).map(l => String(l == null ? '' : l).trim()).filter(Boolean);
+  if (math.length > MATH_MAX_LINES) throw new Error(`Please use at most ${MATH_MAX_LINES} equation lines.`);
+  if (math.some(l => l.length > MATH_MAX_LINE_CHARS)) throw new Error('One of the equations is too long.');
+  return math;
+}
+
+function parseContent_(content) {
+  if (!content) return null;
+  try { const c = JSON.parse(String(content)); return (c && typeof c === 'object') ? c : null; } catch (e) { return null; }
+}
+
+/** The parts of a response to show: { text, math: [latex...], corrected }. Takes raw cell values.
+ *  corrected is true when the instructor has edited the equations. */
+function responseParts_(edited, original, content) {
+  const c = parseContent_(content);
+  if (c) {
+    const corrected = Array.isArray(c.math_edited);
+    const math = (corrected ? c.math_edited : (Array.isArray(c.math) ? c.math : [])).map(String);
+    return { text: String(edited || '') || String(c.text || ''), math, corrected };
+  }
+  return { text: String(edited || '') || String(original || ''), math: [], corrected: false };
+}
+
+/** Student submission: disabled during review. payload: { response_text_original,
+ *  reviewer_token, confidence } for text activities, or { math: [latex...], reviewer_token,
+ *  confidence } for math activities (equations only, no text). */
 function apiSubmitResponse(session_id, payload) {
+  payload = payload || {};
   const session = getSession(session_id);
   if (!session) throw new Error('Session not found.');
   if (!isSessionActive(session)) throw new Error('This session has ended, so new responses are closed.');
 
   const phase = getPhaseForSession(session); // writing | review
   if (phase === 'review') throw new Error('Writing is disabled during peer review.');
-  if (getSessionSettings_(session).submission_type !== 'text') {
+  const type = getSessionSettings_(session).submission_type;
+  if (type !== 'text' && type !== 'math') {
     throw new Error('This activity expects a different kind of submission. Please reload the page.');
   }
-
   const settings = getSettings();
+  const profList = getProfanityList();
+  const action = (settings.profanity_action || 'mask').toLowerCase();
   const text = String(payload.response_text_original || '').trim();
-  const words = text.split(/\s+/).filter(Boolean);
+  const math = cleanMathLines_(payload.math);
 
+  const rowPayload = {
+    session_id,
+    reviewer_token: String(payload.reviewer_token || ''),
+    is_hidden: 'FALSE',
+    is_pinned: 'FALSE',
+    order_weight: '',
+    confidence: Number(payload.confidence || '') || '',
+    tags: '',
+    phase_at_submit: phase  // stamp phase at submit time
+  };
+
+  if (type === 'math') {
+    if (text) throw new Error('This activity takes equations only. Please reload the page.');
+    if (!math.length) throw new Error('Please add an equation.');
+    if (math.join('').length < settings.min_chars) throw new Error('Response too short.');
+    // Equations can't be masked without breaking them: a listed term is blocked or flagged
+    const prof = hasProfanity(math.join(' '), profList);
+    if (prof && action === 'block') throw new Error('Your response contains disallowed terms.');
+    rowPayload.profanity_flag = prof ? 'FLAGGED' : 'NONE';
+    rowPayload.response_text_original = math.map(l => '$$' + l + '$$').join('\n');
+    rowPayload.response_text_edited = '';
+    ensureHeaderColumn_(getResponsesSheet(), 'response_content');
+    rowPayload.response_content = JSON.stringify({ math });
+    return { ok: true, response_id: writeResponse_(rowPayload) };
+  }
+
+  // Text activity
+  if (math.length) throw new Error('This activity takes text only. Please reload the page.');
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!text) throw new Error('Please enter a response.');
   if (settings.max_words && words.length > settings.max_words) {
     throw new Error(`Please keep to ${settings.max_words} words.`);
   }
@@ -55,12 +125,9 @@ function apiSubmitResponse(session_id, payload) {
   }
 
   // Profanity handling
-  const profList = getProfanityList();
-  const hasProf = hasProfanity(text, profList);
   let response_text_masked = text;
   let profanity_flag = 'NONE';
-  const action = (settings.profanity_action || 'mask').toLowerCase();
-  if (hasProf) {
+  if (hasProfanity(text, profList)) {
     if (action === 'block') {
       throw new Error('Your response contains disallowed terms.');
     } else if (action === 'mask') {
@@ -70,23 +137,10 @@ function apiSubmitResponse(session_id, payload) {
       profanity_flag = 'FLAGGED';
     }
   }
-
-  const rowPayload = {
-    session_id,
-    reviewer_token: String(payload.reviewer_token || ''),
-    response_text_original: text,
-    response_text_edited: (profanity_flag === 'MASKED') ? response_text_masked : '',
-    is_hidden: 'FALSE',
-    is_pinned: 'FALSE',
-    order_weight: '',
-    profanity_flag,
-    confidence: Number(payload.confidence || '') || '',
-    tags: '',
-    phase_at_submit: phase  // stamp phase at submit time
-  };
-
-  const id = writeResponse_(rowPayload);
-  return { ok: true, response_id: id };
+  rowPayload.response_text_original = text;
+  rowPayload.response_text_edited = (profanity_flag === 'MASKED') ? response_text_masked : '';
+  rowPayload.profanity_flag = profanity_flag;
+  return { ok: true, response_id: writeResponse_(rowPayload) };
 }
 
 /** Legacy student API (fallback used by student.html when apiSubmitResponse fails).
@@ -120,8 +174,14 @@ function listResponsesForInstructor_(instructor_id, session_id) {
 
   return rows
     .filter(r => String(r[idx('session_id')]).trim().toLowerCase() === String(session_id).trim().toLowerCase())
-    .map(r => ({
+    .map(r => {
+      const parts = responseParts_(r[idx('response_text_edited')], r[idx('response_text_original')],
+                                   idx('response_content') >= 0 ? r[idx('response_content')] : '');
+      return {
       response_id: String(r[idx('response_id')] || ''),
+      text: parts.text,   // the text part to show (instructor edit, else what the student wrote)
+      math: parts.math,   // equations (LaTeX) to show, math activities only
+      corrected: parts.corrected,  // the instructor has edited the equations
       response_text_original: String(r[idx('response_text_original')] || ''),
       response_text_edited: String(r[idx('response_text_edited')] || ''),
       timestamp: String(r[idx('timestamp')] || ''),
@@ -134,7 +194,8 @@ function listResponsesForInstructor_(instructor_id, session_id) {
       pos_x: Number(r[idx('pos_x')] || 0),
       pos_y: Number(r[idx('pos_y')] || 0),
       phase_at_submit: idx('phase_at_submit') >= 0 ? String(r[idx('phase_at_submit')] || '') : ''
-    }));
+      };
+    });
 }
 
 /** Update response fields (validate ownership via session mapping) */
@@ -161,6 +222,26 @@ function apiUpdateResponse(token, response_id, patch) {
     throw new Error('Not authorized to modify this response.');
   }
 
+  // Correcting a math response: patch.math_edited is the corrected equations, or null to go
+  // back to the student's own. The submission itself (math) is never changed.
+  let result = { ok: true };
+  if ('math_edited' in patch) {
+    const cCol = header.indexOf('response_content');
+    const content = cCol >= 0 ? parseContent_(row[cCol]) : null;
+    if (!content || !Array.isArray(content.math)) throw new Error('This response has no equations to edit.');
+    if (patch.math_edited === null) {
+      delete content.math_edited;
+    } else {
+      const lines = cleanMathLines_(patch.math_edited);
+      if (!lines.length) throw new Error('An answer needs at least one equation. To remove it, hide the card instead.');
+      if (JSON.stringify(lines) === JSON.stringify(content.math)) delete content.math_edited;  // back to the original
+      else content.math_edited = lines;
+    }
+    sh.getRange(2 + rIndex, cCol + 1).setValue(JSON.stringify(content));
+    const parts = responseParts_('', '', JSON.stringify(content));
+    result = { ok: true, math: parts.math, corrected: parts.corrected };
+  }
+
   const allowed = ['response_text_edited', 'is_pinned', 'is_hidden', 'order_weight', 'tags', 'pos_x', 'pos_y'];
   allowed.forEach(k => {
     if (k in patch) {
@@ -169,7 +250,7 @@ function apiUpdateResponse(token, response_id, patch) {
     }
   });
 
-  return { ok: true };
+  return result;
 }
 
 /** Gate: has this reviewer submitted at least one response in this session? (non-hidden only) */
@@ -211,6 +292,7 @@ function apiGetResponseText(session_id, response_id) {
   if (!row) return { ok:false, error:'Response not found' };
   if (String(row[hidCol]||'FALSE').toLowerCase() === 'true') return { ok:false, error:'Response is hidden' };
 
-  const text = String(row[txtECol]||'') || String(row[txtOCol]||'');
-  return { ok:true, response_id: String(response_id), text };
+  const cCol = hdr.indexOf('response_content');
+  const parts = responseParts_(row[txtECol], row[txtOCol], cCol >= 0 ? row[cCol] : '');
+  return { ok:true, response_id: String(response_id), text: parts.text, math: parts.math };
 }
