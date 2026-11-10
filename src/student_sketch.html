@@ -7,6 +7,7 @@
     let SKETCH_COLOUR = 0;
     let SKETCH_ENABLED = false;
     let SKETCH_BG = 'blank';
+    let SKETCH_IMG = '';          // the figure's address when drawing on a figure
     let SKETCH_LIVE = null;       // points of the stroke being drawn
     let SKETCH_ERASED = null;     // strokes removed by the current eraser drag
     let SKETCH_POINTER = null;    // pointerId being followed (one finger/pen at a time)
@@ -24,9 +25,25 @@
       if (show) {
         ensureSketchPad();
         const bg = (SETTINGS && SETTINGS.background) || 'blank';
-        if (bg !== SKETCH_BG) { SKETCH_BG = bg; SKETCH_PAD.bg.innerHTML = sketchBackgroundSVG(bg); }
+        const img = bg === 'image' ? String((SETTINGS && SETTINGS.background_url) || '') : '';
+        if (bg !== SKETCH_BG || img !== SKETCH_IMG) {
+          SKETCH_BG = bg; SKETCH_IMG = img;
+          SKETCH_PAD.bg.innerHTML = sketchBackgroundSVG(bg, img);
+          checkSketchFigure(img);
+        }
       }
       setSketchEnabled(show && canWrite);
+    }
+
+    /** Tell the student if the figure to draw on can't be loaded (they can still draw) */
+    function checkSketchFigure(img){
+      const note = document.getElementById('sketchFigureNote');
+      note.style.display = 'none';
+      if (!img || typeof Image !== 'function') return;
+      const probe = new Image();
+      probe.onload = () => { if (img === SKETCH_IMG) note.style.display = 'none'; };
+      probe.onerror = () => { if (img === SKETCH_IMG) note.style.display = 'block'; };
+      probe.src = img;
     }
 
     function ensureSketchPad(){

@@ -115,3 +115,18 @@ eq('all three cleared', [el('responseText').value, MATH_FIELDS[0].field.value, S
 el('responseText').value = 'just words';
 submitResponse();
 eq('text alone is fine', sheetObjects('Responses').slice(-1)[0].response_text_original, 'just words');
+
+// Drawing on a figure: the pad shows it under the strokes; the server adds its address
+const FIG = 'https://example.org/figs/scatter.png';
+__SERVER.apiStartSession(tok, 'fig1', 64, { submission_type: 'sketch', peer_review: false, background: 'image', background_url: FIG });
+pollView();
+eq('figure on the pad', [SKETCH_BG, SKETCH_PAD.bg.innerHTML.includes('<image href="' + FIG + '"')], ['image', true]);
+draw([[100, 100], [140, 120]]);
+submitResponse();
+eq('saved with the figure', [stored().slice(-1)[0].sketch.bg, stored().slice(-1)[0].sketch.img], ['image', FIG]);
+eq('card/enlarged SVG shows the figure under the strokes', /<image href="[^"]+scatter\.png"[^>]*>.*<path d="M100/.test(sketchSVG(stored().slice(-1)[0].sketch)), true);
+__SERVER.apiStartSession(tok, 'fig1', 64, { submission_type: 'sketch', peer_review: false, background: 'image', background_url: 'https://example.org/figs/other.png' });
+pollView();
+eq('new figure picked up without a reload', SKETCH_PAD.bg.innerHTML.includes('other.png'), true);
+eq('SVG: unsafe figure address not drawn', sketchSVG({ bg: 'image', img: 'javascript:alert(1)', s: [] }).includes('<image'), false);
+eq('SVG: & in an address is escaped', sketchSVG({ bg: 'image', img: 'https://e.org/a.png?x=1&y=2', s: [] }).includes('x=1&amp;y=2'), true);

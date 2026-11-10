@@ -61,6 +61,7 @@
         <button type="button" class="sketchTool" onclick="undoSketch()" title="Undo">↶ Undo</button>
         <button type="button" class="sketchTool" onclick="if (confirm('Clear your drawing?')) clearSketch()" title="Clear the drawing (Undo brings it back)">Clear</button>
       </div>
+      <div class="small err" id="sketchFigureNote" style="display:none;">The figure couldn't be loaded. You can still draw; let your instructor know.</div>
       <div id="sketchPad" class="sketchPad"></div>
       <div class="small" id="sketchSize"></div>
     </div>

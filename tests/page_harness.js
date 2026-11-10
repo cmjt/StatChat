@@ -14,6 +14,7 @@ FakeEl.prototype.addEventListener = function () {};
 FakeEl.prototype.appendChild = function (c) { this.children.push(c); c.parentNode = this; return c; };
 FakeEl.prototype.removeChild = function (c) { this.children = this.children.filter(x => x !== c); c.parentNode = null; return c; };
 FakeEl.prototype.setAttribute = function (k, v) { (this.attrs = this.attrs || {})[k] = String(v); };
+FakeEl.prototype.removeAttribute = function (k) { if (this.attrs) delete this.attrs[k]; if (k in this) this[k] = ''; };
 FakeEl.prototype.closest = function () { return null; };
 FakeEl.prototype.getBoundingClientRect = function () { return { left: 0, top: 0, width: 1000, height: 800 }; };
 FakeEl.prototype.focus = function () {};

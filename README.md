@@ -14,7 +14,7 @@ When opening a session, the instructor answers two questions:
 | Question | Choices |
 |---|---|
 | **Students submit** (tick one or more) | **Text**: short written answers or poll replies. **Math**: typed equations. **Drawing**: a sketch drawn with a finger, stylus or mouse |
-| **Draw on** (when Drawing is ticked) | **Blank**, **Grid** or **Axes** |
+| **Draw on** (when Drawing is ticked) | **Blank**, **Grid**, **Axes** or **Figure** (an image you give the address of, for students to annotate) |
 | **Peer review** | **Off**: responses are shown live as cards and charts, and peer review controls are hidden. **On**: after writing, students review classmates' answers when the instructor opens the review |
 
 Any combination of Text, Math and Drawing can be ticked. Students get a text
@@ -26,8 +26,9 @@ math* or *Quick response · text, math & drawing*.
 
 Each session stores the answers in Sessions columns `submission_type` (the
 ticked parts joined by `_`, always in the order `text`, `math`, `sketch`: e.g.
-`text`, `math_sketch` or `text_math_sketch`), `peer_review` (`TRUE`/`FALSE`) and
-`sketch_background` (`blank`, `grid` or `axes`), all added automatically. The
+`text`, `math_sketch` or `text_math_sketch`), `peer_review` (`TRUE`/`FALSE`),
+`sketch_background` (`blank`, `grid`, `axes` or `image`) and `sketch_image_url`
+(the figure's address), all added automatically. The
 server enforces them: peer review can't be opened when it's off, and each
 activity accepts only the parts that were ticked. Logging in again with different answers changes
 them, except while the session is in peer review. Sessions created before
@@ -70,8 +71,20 @@ to 10, which they can add or remove (for example, one step of working per line).
 
 ### Drawing activities
 
-Students get a **drawing pad** on the background you chose (blank, grid, or
-first-quadrant axes for sketching distributions, scatterplots and curves).
+Students get a **drawing pad** on the background you chose (blank, grid,
+first-quadrant axes for sketching distributions, scatterplots and curves, or a
+figure to annotate).
+
+- **Figure:** paste the image's address (URL) when you choose **Figure**, and
+  check the preview under the box. It must start with `https://` and be viewable
+  by anyone with the link. A Google Drive share link works if the file is shared
+  with *Anyone with the link*; it's converted to a direct image link
+  automatically. The figure is fitted inside the pad without stretching, and
+  students draw on top of it. If a student's device can't load it, they're told
+  and can still draw. Each drawing records the figure it was made on (the server
+  adds it, so students can't substitute another image), so changing the figure
+  later doesn't affect earlier drawings. The image itself isn't copied: if it's
+  deleted or unshared, drawings show without it.
 
 - **Tools:** black, blue and red pens, an eraser that removes whole lines,
   Undo, and Clear (which Undo can bring back). It works with a finger, stylus
@@ -90,7 +103,8 @@ first-quadrant axes for sketching distributions, scatterplots and curves).
   sketch takes a few hundred to a few thousand characters. The limit is 30,000
   characters (a Sheets cell holds 50,000); students are warned at 70% and can't
   submit past 100%. `response_text_original` gets a note such as
-  `[drawing: 3 lines]`.
+  `[drawing: 3 lines]`. A drawing on a figure also has `"bg": "image"` and `"img"`: the
+  figure's address.
 - **Drawings can't be checked for profanity.** Hide anything inappropriate.
 
 **Students' pages update themselves.** They re-check every 20–30 seconds
@@ -292,7 +306,8 @@ Recommended columns (features that use them are skipped if they're missing):
 - peer_until — review deadline (added automatically when peer review is opened)
 - submission_type — the ticked parts, e.g. `text`, `math_sketch` or `text_math_sketch` (added automatically; see [Activities](#activities))
 - peer_review — `TRUE`/`FALSE` (added automatically)
-- sketch_background — `blank`, `grid` or `axes` (added automatically)
+- sketch_background — `blank`, `grid`, `axes` or `image` (added automatically)
+- sketch_image_url — the figure's address when sketch_background is `image` (added automatically)
 
 ---
 

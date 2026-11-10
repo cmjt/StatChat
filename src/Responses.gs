@@ -41,6 +41,7 @@ function writeResponse_(payload) {
 //
 // A drawing ("sketch") is pen strokes on a SKETCH_W x SKETCH_H canvas, in whole units:
 //   {"v": 1, "bg": "axes", "s": [[colour, x0, y0, dx1, dy1, dx2, dy2, ...], ...]}
+// A drawing on a figure has "bg": "image" and "img": the figure's address.
 // Each stroke is a colour index then its first point, then each next point as a step from
 // the previous one, which keeps drawings small enough for a Sheets cell (50,000 characters).
 const MATH_MAX_LINES = 10;
@@ -60,8 +61,9 @@ function cleanMathLines_(lines) {
 }
 
 /** A drawing checked and rebuilt from numbers only, or null if there's nothing drawn.
- *  Throws if it's malformed or too detailed. */
-function cleanSketch_(sketch) {
+ *  Throws if it's malformed or too detailed. A drawing on a figure gets the figure's address
+ *  from the activity's settings (never from the student), so it always shows the right one. */
+function cleanSketch_(sketch, activity) {
   if (sketch === undefined || sketch === null || sketch === '') return null;
   const bad = () => new Error('The drawing could not be read. Please try again.');
   const big = () => new Error('Your drawing is too detailed to save. Try fewer or simpler lines.');
@@ -87,6 +89,10 @@ function cleanSketch_(sketch) {
   });
   if (points > SKETCH_MAX_POINTS) throw big();
   const out = { v: 1, bg: SKETCH_BACKGROUNDS.indexOf(sketch.bg) >= 0 ? sketch.bg : 'blank', s: strokes };
+  if (out.bg === 'image') {
+    if (activity && activity.background === 'image' && activity.background_url) out.img = activity.background_url;
+    else out.bg = 'blank';
+  }
   if (JSON.stringify(out).length > SKETCH_MAX_CHARS) throw big();
   return out;
 }
@@ -121,7 +127,8 @@ function apiSubmitResponse(session_id, payload) {
 
   const phase = getPhaseForSession(session); // writing | review
   if (phase === 'review') throw new Error('Writing is disabled during peer review.');
-  const kind = submissionKind_(getSessionSettings_(session).submission_type);
+  const activity = getSessionSettings_(session);
+  const kind = submissionKind_(activity.submission_type);
   if (!kind) {
     throw new Error('This activity expects a different kind of submission. Please reload the page.');
   }
@@ -130,7 +137,7 @@ function apiSubmitResponse(session_id, payload) {
   const action = (settings.profanity_action || 'mask').toLowerCase();
   const text = String(payload.response_text_original || '').trim();
   const math = cleanMathLines_(payload.math);
-  const sketch = cleanSketch_(payload.sketch);
+  const sketch = cleanSketch_(payload.sketch, activity);
 
   const rowPayload = {
     session_id,

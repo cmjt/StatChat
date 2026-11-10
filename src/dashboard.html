@@ -50,14 +50,24 @@
         <fieldset class="presetPicker" id="backgroundPicker" style="display:none;">
           <legend>Draw on</legend>
           <label class="presetOption inline">
-            <input type="radio" name="sketchBackground" value="blank" checked><span>Blank</span>
+            <input type="radio" name="sketchBackground" value="blank" checked onchange="updateLoginOptions()"><span>Blank</span>
           </label>
           <label class="presetOption inline">
-            <input type="radio" name="sketchBackground" value="grid"><span>Grid</span>
+            <input type="radio" name="sketchBackground" value="grid" onchange="updateLoginOptions()"><span>Grid</span>
           </label>
           <label class="presetOption inline">
-            <input type="radio" name="sketchBackground" value="axes"><span>Axes</span>
+            <input type="radio" name="sketchBackground" value="axes" onchange="updateLoginOptions()"><span>Axes</span>
           </label>
+          <label class="presetOption inline">
+            <input type="radio" name="sketchBackground" value="image" onchange="updateLoginOptions()"><span>Figure</span>
+          </label>
+          <div id="figureRow" style="display:none; margin-top:8px;">
+            <label for="sketchImageUrl"><small>Figure address (URL) for students to draw on</small></label>
+            <input id="sketchImageUrl" type="url" placeholder="https://… (an image link, or a Google Drive share link)" style="width:100%;" oninput="previewFigure()">
+            <small>The image must be viewable by anyone with the link. Google Drive: Share → General access → <i>Anyone with the link</i>.</small>
+            <div id="figureMsg" class="small"></div>
+            <img id="figurePreview" alt="Figure preview" style="display:none; margin-top:6px; max-width:300px; aspect-ratio:3/2; object-fit:contain; border:1px solid #d0d5dd; border-radius:6px; background:#fff;">
+          </div>
         </fieldset>
         <fieldset class="presetPicker">
           <legend>Peer review</legend>

@@ -116,10 +116,18 @@
         submission_type: parts.join('_'),
         peer_review: !!(peerEl && peerEl.value === 'true'),
         background: bgEl ? bgEl.value : 'blank',
+        background_url: (document.getElementById('sketchImageUrl').value || '').trim(),
       };
+      if (parts.indexOf('sketch') === -1) { activity.background = 'blank'; activity.background_url = ''; }
+      if (activity.background !== 'image') activity.background_url = '';
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
       if (!parts.length) { msg.style.color='#c00'; msg.textContent='Tick at least one thing for students to submit.'; btn.disabled=false; return; }
+      if (activity.background === 'image' && !sketchImageUrl(activity.background_url)) {
+        msg.style.color='#c00';
+        msg.textContent = activity.background_url ? 'The figure address must be a web link starting with https://.' : 'Enter the address (URL) of the figure for students to draw on.';
+        btn.disabled=false; return;
+      }
       if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
 
       google.script.run
@@ -172,10 +180,33 @@
         .filter(([, id]) => document.getElementById(id).checked)
         .map(([part]) => part);
     }
-    /** Login form: the background choice only applies when Drawing is ticked */
+    /** Login form: the background choice only applies when Drawing is ticked, and the figure
+     *  address only when Figure is chosen */
     function updateLoginOptions(){
       const drawing = chosenSubmissionParts().indexOf('sketch') >= 0;
       document.getElementById('backgroundPicker').style.display = drawing ? '' : 'none';
+      const bgEl = document.querySelector('input[name="sketchBackground"]:checked');
+      const figure = drawing && !!bgEl && bgEl.value === 'image';
+      document.getElementById('figureRow').style.display = figure ? '' : 'none';
+      if (figure) previewFigure();
+    }
+    /** Show the figure as students will see it, or say why it can't be used */
+    function previewFigure(){
+      const raw = (document.getElementById('sketchImageUrl').value || '').trim();
+      const url = sketchImageUrl(raw);
+      const img = document.getElementById('figurePreview');
+      const msg = document.getElementById('figureMsg');
+      const say = (t, bad) => { msg.textContent = t; msg.style.color = bad ? '#c00' : ''; };
+      if (!url) {
+        img.style.display = 'none'; img.removeAttribute('src');
+        say(raw ? 'Use a web link starting with https://.' : '', !!raw);
+        return;
+      }
+      say('Loading preview…');
+      img.onload = () => { if (img.dataset.src === url) { img.style.display = ''; say(''); } };
+      img.onerror = () => { if (img.dataset.src === url) { img.style.display = 'none'; say("This image couldn't be loaded. Check the link, and that it's shared with anyone who has it.", true); } };
+      img.dataset.src = url;
+      img.src = url;
     }
     function showDashboard(inst, sessionId) {
       document.getElementById('loginView').style.display = 'none';

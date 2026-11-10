@@ -1,7 +1,8 @@
   <!-- sketch: shared by student.html and dashboard.html. Drawings as data, as SVG, and the
        enlarged view. A drawing is pen strokes on a 600 x 400 canvas in whole units:
          { v: 1, bg: 'axes', s: [[colour, x0, y0, dx1, dy1, ...], ...] }
-       (each later point is a step from the one before). Src/Responses.gs checks the same
+       (each later point is a step from the one before). A drawing on a figure has
+       bg: 'image' and img: the figure's address, added by the server. Src/Responses.gs checks the same
        format and limits. -->
   <style>
     .sketchSvg { display:block; width:100%; height:auto; background:#fff; border:1px solid #d0d5dd; border-radius:6px; }
@@ -16,7 +17,23 @@
     const SKETCH_COLOURS = ['#111827', '#1d4ed8', '#dc2626'];   // black, blue, red
     const SKETCH_COLOUR_NAMES = ['Black', 'Blue', 'Red'];
     const SKETCH_STROKE_W = 3;
-    const SKETCH_BACKGROUNDS = ['blank', 'grid', 'axes'];
+    const SKETCH_BACKGROUNDS = ['blank', 'grid', 'axes', 'image'];
+
+    /** A figure address made ready to show, as the server does it (normalizeImageUrl_ in
+     *  src/Sessions.gs): a Google Drive share link becomes a direct image link; anything else
+     *  must be a plain https:// address. '' if it can't be used. */
+    function sketchImageUrl(raw){
+      const url = String(raw == null ? '' : raw).trim();
+      if (!url || url.length > 2000) return '';
+      const drive = /^https:\/\/drive\.google\.com\/(?:file\/d\/([\w-]+)|(?:open|uc)\?(?:[^#]*&)?id=([\w-]+))/.exec(url);
+      if (drive) return 'https://drive.google.com/thumbnail?id=' + (drive[1] || drive[2]) + '&sz=w1600';
+      return /^https:\/\/[^\s"'<>\\`]+$/i.test(url) ? url : '';
+    }
+    /** An image address made safe for an HTML/SVG attribute (or '' if it isn't https) */
+    function sketchImageAttr(url){
+      const u = /^https:\/\/[^\s"'<>\\`]+$/i.test(String(url || '')) ? String(url) : '';
+      return u.replace(/&/g, '&amp;');
+    }
     const SKETCH_MAX_CHARS = 30000;   // must match src/Responses.gs
 
     /** A stored stroke [c, x0, y0, dx1, dy1, ...] as { c, pts: [[x, y], ...] } */
@@ -84,10 +101,14 @@
       const colour = SKETCH_COLOURS[st.c] || SKETCH_COLOURS[0];
       return `<path d="${strokePathD(st.pts)}" stroke="${colour}" stroke-width="${SKETCH_STROKE_W}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
-    /** The background as SVG markup (numbers and fixed strings only) */
-    function sketchBackgroundSVG(bg){
+    /** The background as SVG markup (numbers, fixed strings and a checked https address).
+     *  img is the figure's address when bg is 'image'; it's fitted inside the canvas. */
+    function sketchBackgroundSVG(bg, img){
       let out = `<rect x="0" y="0" width="${SKETCH_W}" height="${SKETCH_H}" fill="#fff"/>`;
-      if (bg === 'grid') {
+      const href = bg === 'image' ? sketchImageAttr(img) : '';
+      if (href) {
+        out += `<image href="${href}" x="0" y="0" width="${SKETCH_W}" height="${SKETCH_H}" preserveAspectRatio="xMidYMid meet"/>`;
+      } else if (bg === 'grid') {
         let d = '';
         for (let x = 25; x < SKETCH_W; x += 25) d += `M${x} 0V${SKETCH_H}`;
         for (let y = 25; y < SKETCH_H; y += 25) d += `M0 ${y}H${SKETCH_W}`;
@@ -104,13 +125,13 @@
       }
       return out;
     }
-    /** A drawing as an <svg> string. Built from numbers and fixed colours only, so it's
-     *  safe to insert with innerHTML. */
+    /** A drawing as an <svg> string. Built from numbers, fixed colours and a checked figure
+     *  address only, so it's safe to insert with innerHTML. */
     function sketchSVG(sketch, cls){
       const bg = SKETCH_BACKGROUNDS.indexOf(sketch && sketch.bg) >= 0 ? sketch.bg : 'blank';
       const strokes = (sketch && Array.isArray(sketch.s)) ? sketch.s : [];
       return `<svg class="${cls || 'sketchSvg'}" viewBox="0 0 ${SKETCH_W} ${SKETCH_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Drawing">`
-        + sketchBackgroundSVG(bg) + strokes.map(a => strokeSVG(decodeStroke(a))).join('') + '</svg>';
+        + sketchBackgroundSVG(bg, sketch && sketch.img) + strokes.map(a => strokeSVG(decodeStroke(a))).join('') + '</svg>';
     }
     function hasSketch(sketch){ return !!(sketch && Array.isArray(sketch.s) && sketch.s.length); }
 

@@ -124,3 +124,19 @@ eq('all three: label', el('activityLabel').textContent, 'Quick response · text,
 el('startMsg').textContent = '';
 tick(''); handleLoginAndStart();
 eq('nothing ticked: asked to tick one', el('startMsg').textContent, 'Tick at least one thing for students to submit.');
+
+// Figure: the address box appears for Figure, is previewed, and is needed to start
+tick('sketch'); chosen.sketchBackground = 'image'; updateLoginOptions();
+eq('figure chosen: address box shown', el('figureRow').style.display, '');
+chosen.sketchBackground = 'grid'; updateLoginOptions();
+eq('grid chosen: address box hidden', el('figureRow').style.display, 'none');
+el('sketchImageUrl').value = 'https://drive.google.com/file/d/ABC123/view'; chosen.sketchBackground = 'image'; updateLoginOptions();
+eq('Drive link previewed as a direct image', el('figurePreview').src, 'https://drive.google.com/thumbnail?id=ABC123&sz=w1600');
+el('sketchImageUrl').value = 'http://insecure.example/a.png'; previewFigure();
+eq('http: explained, no preview', [el('figureMsg').textContent, el('figurePreview').style.display], ['Use a web link starting with https://.', 'none']);
+el('startMsg').textContent = '';
+login('fig1', 'respond', 'sketch', 'image');
+eq('bad address: login stops with a reason', el('startMsg').textContent, 'The figure address must be a web link starting with https://.');
+el('sketchImageUrl').value = 'https://example.org/f.png';
+login('fig1', 'respond', 'sketch', 'image');
+eq('good address: session uses the figure', [SESSION_STATE.settings.background, SESSION_STATE.settings.background_url], ['image', 'https://example.org/f.png']);
