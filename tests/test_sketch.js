@@ -51,12 +51,12 @@ const long = [0, 0, 0]; for (let i = 0; i < 12001; i++) long.push(i % 2 ? 0 : 0,
 throws('too many points rejected', () => send('d1', { sketch: drawing([long]) }), /too detailed/);
 const wiggly = []; for (let k = 0; k < 400; k++) { const st = [1, 300, 200]; for (let i = 0; i < 14; i++) st.push(i % 2 ? -150 : 150, i % 2 ? 99 : -99); wiggly.push(st); }
 throws('too many characters rejected', () => send('d1', { sketch: drawing(wiggly) }), /too detailed/);
-throws('equations refused in a drawing activity', () => send('d1', { math: ['x=1'] }), /not equations/);
-throws('text refused in a drawing activity', () => send('d1', { response_text_original: 'hi', sketch: drawing([line]) }), /not text/);
+throws('equations refused in a drawing activity', () => send('d1', { math: ['x=1'] }), /doesn't take equations/);
+throws('text refused in a drawing activity', () => send('d1', { response_text_original: 'hi', sketch: drawing([line]) }), /doesn't take text/);
 apiStartSession(tok, 'm1', 62, { submission_type: 'math' });
-throws('drawing refused in a math activity', () => send('m1', { math: ['x=1'], sketch: drawing([line]) }), /not a drawing/);
+throws('drawing refused in a math activity', () => send('m1', { math: ['x=1'], sketch: drawing([line]) }), /doesn't take a drawing/);
 apiStartSession(tok, 't1', 63, 'respond');
-throws('drawing refused in a text activity', () => send('t1', { response_text_original: 'hi', sketch: drawing([line]) }), /text only/);
+throws('drawing refused in a text activity', () => send('t1', { response_text_original: 'hi', sketch: drawing([line]) }), /doesn't take a drawing/);
 
 // --- Math & drawing: either or both ---
 tok = freshSheets();

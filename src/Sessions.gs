@@ -57,17 +57,15 @@ function parseDeadline_(iso) {
 
 // ===== Activity settings =====
 // Each session has these settings, chosen at login:
-//   submission_type: what students submit: 'text', 'math' (typed equations), 'sketch' (a
-//                    drawing) or 'math_sketch' (equations and/or a drawing)
+//   submission_type: what students submit: any combination of 'text', 'math' (typed
+//                    equations) and 'sketch' (a drawing), joined by '_' in that order, e.g.
+//                    'text', 'math_sketch' or 'text_math_sketch'. Students submit at least
+//                    one of the chosen parts.
 //   peer_review:     whether the session can have a peer review phase
 //   background:      what drawings are made on: 'blank', 'grid' or 'axes' (drawing types only)
 // PRESETS are the older single-choice names, still accepted by apiStartSession.
-const SUBMISSION_TYPES = {
-  text:        { label_suffix: '',                   math: false, sketch: false },
-  math:        { label_suffix: ' · math',            math: true,  sketch: false },
-  sketch:      { label_suffix: ' · drawing',         math: false, sketch: true  },
-  math_sketch: { label_suffix: ' · math & drawing',  math: true,  sketch: true  },
-};
+const SUBMISSION_PARTS = ['text', 'math', 'sketch'];
+const SUBMISSION_PART_NAMES = { text: 'text', math: 'math', sketch: 'drawing' };
 const SKETCH_BACKGROUNDS = ['blank', 'grid', 'axes'];
 const PRESETS = {
   respond: { label: 'Quick response', submission_type: 'text', peer_review: false },
@@ -75,17 +73,40 @@ const PRESETS = {
 };
 const DEFAULT_PRESET = 'respond';
 
-/** Activity name shown to instructors and students, e.g. "Quick response" or "Peer review · math" */
+/** A submission type in its stored form ('text_math', ...), or '' if it isn't valid. Takes a
+ *  string ('math_sketch', 'text,math') or an array of parts (['math', 'text']). */
+function normalizeSubmissionType_(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw == null ? '' : raw).split(/[\s_,+]+/);
+  const parts = list.map(p => String(p).trim().toLowerCase()).filter(Boolean);
+  if (!parts.length || parts.some(p => SUBMISSION_PARTS.indexOf(p) === -1)) return '';
+  return SUBMISSION_PARTS.filter(p => parts.indexOf(p) >= 0).join('_');
+}
+
+/** Which parts a submission type allows: { text, math, sketch }, or null if it isn't valid */
+function submissionKind_(type) {
+  const norm = normalizeSubmissionType_(type);
+  if (!norm || norm !== String(type)) return null;
+  const parts = norm.split('_');
+  return { text: parts.indexOf('text') >= 0, math: parts.indexOf('math') >= 0, sketch: parts.indexOf('sketch') >= 0 };
+}
+
+/** Activity name shown to instructors and students, e.g. "Quick response", "Peer review · math"
+ *  or "Quick response · text, math & drawing". Text alone adds nothing. */
 function activityLabel_(submission_type, peer_review) {
-  return (peer_review ? 'Peer review' : 'Quick response') + SUBMISSION_TYPES[submission_type].label_suffix;
+  const names = submission_type.split('_').map(p => SUBMISSION_PART_NAMES[p]);
+  const suffix = submission_type === 'text' ? ''
+    : ' · ' + (names.length > 1 ? names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1] : names[0]);
+  return (peer_review ? 'Peer review' : 'Quick response') + suffix;
 }
 
 /** The activity chosen at login: a preset name ('respond' | 'peer') or
  *  { submission_type, peer_review, background }. Returns all three, or throws. */
 function resolveActivity_(activity) {
   if (activity && typeof activity === 'object') {
-    const type = String(activity.submission_type || 'text').trim().toLowerCase();
-    if (!SUBMISSION_TYPES[type]) throw new Error('Unknown submission type: ' + activity.submission_type);
+    const raw = activity.submission_type === undefined || activity.submission_type === null || activity.submission_type === ''
+      ? 'text' : activity.submission_type;
+    const type = normalizeSubmissionType_(raw);
+    if (!type) throw new Error('Unknown submission type: ' + activity.submission_type);
     const bg = String(activity.background || 'blank').trim().toLowerCase();
     if (SKETCH_BACKGROUNDS.indexOf(bg) === -1) throw new Error('Unknown drawing background: ' + activity.background);
     return { submission_type: type, peer_review: prBool(activity.peer_review), background: bg };
@@ -99,12 +120,13 @@ function resolveActivity_(activity) {
  *  cells: they're treated as text with peer review allowed (how the app used to work).
  *  preset is 'respond' or 'peer' (the peer review choice); label is the activity name. */
 function getSessionSettings_(session) {
-  const type = String((session && session.submission_type) || '').trim().toLowerCase() || 'text';
+  const rawType = String((session && session.submission_type) || '').trim().toLowerCase() || 'text';
+  const type = normalizeSubmissionType_(rawType);
   const rawPeer = session ? session.peer_review : '';
   const peer = (rawPeer === '' || rawPeer === undefined || rawPeer === null) ? true : prBool(rawPeer);
   const rawBg = String((session && session.sketch_background) || '').trim().toLowerCase();
   const background = SKETCH_BACKGROUNDS.indexOf(rawBg) >= 0 ? rawBg : 'blank';
-  if (!SUBMISSION_TYPES[type]) return { submission_type: type, peer_review: peer, preset: '', label: 'Custom', background };
+  if (!type) return { submission_type: rawType, peer_review: peer, preset: '', label: 'Custom', background };
   return { submission_type: type, peer_review: peer, preset: peer ? 'peer' : 'respond', label: activityLabel_(type, peer), background };
 }
 

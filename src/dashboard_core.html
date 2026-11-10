@@ -109,16 +109,17 @@
       const pw = document.getElementById('instPw').value || ''; // not trimmed: spaces may be part of the password
       const sessionId = (document.getElementById('newSessionId').value || '').trim();
       const duration_mins = Math.min(1440, Math.max(1, parseInt(document.getElementById('sessionDuration').value, 10) || 60));
-      const typeEl = document.querySelector('input[name="submissionType"]:checked');
+      const parts = chosenSubmissionParts();
       const peerEl = document.querySelector('input[name="peerReview"]:checked');
       const bgEl = document.querySelector('input[name="sketchBackground"]:checked');
       const activity = {
-        submission_type: typeEl ? typeEl.value : 'text',
+        submission_type: parts.join('_'),
         peer_review: !!(peerEl && peerEl.value === 'true'),
         background: bgEl ? bgEl.value : 'blank',
       };
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
+      if (!parts.length) { msg.style.color='#c00'; msg.textContent='Tick at least one thing for students to submit.'; btn.disabled=false; return; }
       if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
 
       google.script.run
@@ -165,10 +166,15 @@
         })
         .apiInstructorLogin(inst, pw);
     }
-    /** Login form: the background choice only applies to drawing activities */
+    /** The ticked "Students submit" boxes, in order: e.g. ['text', 'sketch'] */
+    function chosenSubmissionParts(){
+      return [['text', 'partText'], ['math', 'partMath'], ['sketch', 'partSketch']]
+        .filter(([, id]) => document.getElementById(id).checked)
+        .map(([part]) => part);
+    }
+    /** Login form: the background choice only applies when Drawing is ticked */
     function updateLoginOptions(){
-      const typeEl = document.querySelector('input[name="submissionType"]:checked');
-      const drawing = !!typeEl && (typeEl.value === 'sketch' || typeEl.value === 'math_sketch');
+      const drawing = chosenSubmissionParts().indexOf('sketch') >= 0;
       document.getElementById('backgroundPicker').style.display = drawing ? '' : 'none';
     }
     function showDashboard(inst, sessionId) {

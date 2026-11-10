@@ -242,17 +242,30 @@
         btn.classList.add('active');
       });
     });
-    /** What this activity's answer is made of: equations, a drawing, or (neither) text */
+    /** What this activity's answer can include: { text, math, sketch }. The type is the
+     *  chosen parts joined by '_', e.g. 'text_math'; anything unrecognised is treated as text. */
     function answerKind(){
-      const t = SETTINGS && SETTINGS.submission_type;
-      return { math: t === 'math' || t === 'math_sketch', sketch: t === 'sketch' || t === 'math_sketch' };
+      const parts = String((SETTINGS && SETTINGS.submission_type) || '').split('_');
+      const k = { text: parts.indexOf('text') >= 0, math: parts.indexOf('math') >= 0, sketch: parts.indexOf('sketch') >= 0 };
+      if (!k.text && !k.math && !k.sketch) k.text = true;
+      return k;
     }
-    /** Math and drawing activities replace the text box; called from applyPhaseUI */
+    /** Show the text box, equation lines and drawing pad this activity uses; called from applyPhaseUI */
     function updateAnswerUI(canWrite){
       const k = answerKind();
-      document.getElementById('textSection').style.display = (k.math || k.sketch) ? 'none' : 'block';
+      document.getElementById('textSection').style.display = k.text ? 'block' : 'none';
       updateMathUI(canWrite);
       updateSketchUI(canWrite);
+    }
+    /** What to say when nothing has been filled in, e.g. "Please add text, an equation or a drawing." */
+    function emptyAnswerMessage(k){
+      if (k.text && !k.math && !k.sketch) return 'Please enter a response.';
+      if (!k.text && !k.math) return 'Please draw something.';
+      const opts = [];
+      if (k.text) opts.push('text');
+      if (k.math) opts.push('an equation');
+      if (k.sketch) opts.push('a drawing');
+      return 'Please add ' + (opts.length > 1 ? opts.slice(0, -1).join(', ') + ' or ' + opts[opts.length - 1] : opts[0]) + '.';
     }
     function submittedMessage(){
       return (SETTINGS && SETTINGS.peer_review)
@@ -261,20 +274,16 @@
     }
     function submitResponse(){
       const reviewerToken = REVIEWER_TOKEN;
-      const kind     = answerKind();       // math/drawing activities send no text
-      const isMath   = kind.math || kind.sketch;
-      const text     = isMath ? '' : document.getElementById('responseText').value.trim();
+      const kind     = answerKind();
+      const textOnly = kind.text && !kind.math && !kind.sketch;
+      const text     = kind.text ? document.getElementById('responseText').value.trim() : '';
       const conf     = Number(document.getElementById('confidence').value);
       const math     = kind.math ? getMathLines() : [];
       const sketch   = kind.sketch ? getSketch() : null;
 
       if (CURRENT_PHASE === 'review') { setStatus('Writing is disabled during peer review.', true); return; }
       if (!WRITING_OPEN) { setStatus('Writing is closed for this activity.', true); return; }
-      if (!text && !math.length && !sketch) {
-        setStatus(kind.math && kind.sketch ? 'Please add an equation or a drawing.'
-          : kind.math ? 'Please add an equation.' : kind.sketch ? 'Please draw something.' : 'Please enter a response.', true);
-        return;
-      }
+      if (!text && !math.length && !sketch) { setStatus(emptyAnswerMessage(kind), true); return; }
       if (sketch && sketchSize() > SKETCH_MAX_CHARS) {
         setStatus('Your drawing is too detailed to save. Undo or erase some lines.', true);
         return;
@@ -284,18 +293,17 @@
       setStatus('Submitting…');
       document.getElementById('submitBtn').disabled = true;
 
-      const payload = !isMath
-        ? { response_text_original: text, reviewer_token: reviewerToken, confidence: conf }
-        : { math, sketch, reviewer_token: reviewerToken, confidence: conf };
+      const payload = { response_text_original: text, reviewer_token: reviewerToken, confidence: conf };
+      if (kind.math) payload.math = math;
+      if (kind.sketch) payload.sketch = sketch;
 
       const submitted = () => {
-        if (isMath) {
-          if (kind.math) clearMathLines();
-          if (kind.sketch) resetSketch();
-        } else {
+        if (kind.text) {
           document.getElementById('responseText').value = '';
           document.getElementById('wordCount').textContent = 'Words: 0';
         }
+        if (kind.math) clearMathLines();
+        if (kind.sketch) resetSketch();
         setStatus(submittedMessage(), false);
       };
       const done = () => { document.getElementById('submitBtn').disabled = !WRITING_OPEN; };
@@ -307,9 +315,9 @@
           done();
         })
         .withFailureHandler(err=>{
-          // Math answers can't go through the older text-only API: show the error instead
-          // (e.g. too many lines), keeping what the student typed.
-          if (payload.math) {
+          // Only text-only answers can go through the older API: otherwise show the error
+          // (e.g. too many lines), keeping what the student entered.
+          if (!textOnly) {
             setStatus(String(err && err.message ? err.message : err), true);
             done();
             return;

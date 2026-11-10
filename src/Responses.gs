@@ -31,12 +31,13 @@ function writeResponse_(payload) {
   });
 }
 
-// Math and drawing responses are kept as JSON in the response_content column:
-//   {"math": ["\\bar{x} = 4.2", ...], "math_edited": [...], "sketch": {...}}
+// Responses with equations and/or a drawing are kept as JSON in the response_content column:
+//   {"text": "...", "math": ["\\bar{x} = 4.2", ...], "math_edited": [...], "sketch": {...}}
+// text is the student's written part, when the activity takes text too (a masked or edited
+// version goes in response_text_edited, as for text-only answers).
 // math is what the student submitted and never changes; math_edited is the instructor's
 // correction, shown instead of it everywhere (like response_text_edited for text).
 // response_text_original also gets a readable copy of the submission ($$...$$ per line).
-// Rows from before math activities were maths-only may also have "text".
 //
 // A drawing ("sketch") is pen strokes on a SKETCH_W x SKETCH_H canvas, in whole units:
 //   {"v": 1, "bg": "axes", "s": [[colour, x0, y0, dx1, dy1, dx2, dy2, ...], ...]}
@@ -109,9 +110,9 @@ function responseParts_(edited, original, content) {
   return { text: String(edited || '') || String(original || ''), math: [], corrected: false, sketch: null };
 }
 
-/** Student submission: disabled during review. payload: { response_text_original,
- *  reviewer_token, confidence } for text activities; for math and drawing activities
- *  { math: [latex...], sketch: {...}, reviewer_token, confidence } (no text). */
+/** Student submission: disabled during review. payload: { response_text_original, math:
+ *  [latex...], sketch: {...}, reviewer_token, confidence }, with only the parts this activity
+ *  allows. Students submit at least one of them. */
 function apiSubmitResponse(session_id, payload) {
   payload = payload || {};
   const session = getSession(session_id);
@@ -120,8 +121,7 @@ function apiSubmitResponse(session_id, payload) {
 
   const phase = getPhaseForSession(session); // writing | review
   if (phase === 'review') throw new Error('Writing is disabled during peer review.');
-  const type = getSessionSettings_(session).submission_type;
-  const kind = SUBMISSION_TYPES[type];
+  const kind = submissionKind_(getSessionSettings_(session).submission_type);
   if (!kind) {
     throw new Error('This activity expects a different kind of submission. Please reload the page.');
   }
@@ -130,6 +130,7 @@ function apiSubmitResponse(session_id, payload) {
   const action = (settings.profanity_action || 'mask').toLowerCase();
   const text = String(payload.response_text_original || '').trim();
   const math = cleanMathLines_(payload.math);
+  const sketch = cleanSketch_(payload.sketch);
 
   const rowPayload = {
     session_id,
@@ -142,61 +143,66 @@ function apiSubmitResponse(session_id, payload) {
     phase_at_submit: phase  // stamp phase at submit time
   };
 
-  if (kind.math || kind.sketch) {
-    const sketch = cleanSketch_(payload.sketch);
-    if (text) throw new Error('This activity takes ' + (kind.math ? 'equations' : 'a drawing') + ', not text. Please reload the page.');
-    if (math.length && !kind.math) throw new Error('This activity takes a drawing, not equations. Please reload the page.');
-    if (sketch && !kind.sketch) throw new Error('This activity takes equations, not a drawing. Please reload the page.');
-    if (!math.length && !sketch) {
-      throw new Error(kind.math && kind.sketch ? 'Please add an equation or a drawing.' : kind.math ? 'Please add an equation.' : 'Please draw something.');
-    }
-    if (math.length && !sketch && math.join('').length < settings.min_chars) throw new Error('Response too short.');
-    // Equations can't be masked without breaking them: a listed term is blocked or flagged.
-    // Drawings can't be checked.
-    const prof = math.length > 0 && hasProfanity(math.join(' '), profList);
-    if (prof && action === 'block') throw new Error('Your response contains disallowed terms.');
-    rowPayload.profanity_flag = prof ? 'FLAGGED' : 'NONE';
-    const readable = math.map(l => '$$' + l + '$$');
-    if (sketch) readable.push(`[drawing: ${sketch.s.length} line${sketch.s.length === 1 ? '' : 's'}]`);
-    rowPayload.response_text_original = readable.join('\n');
-    rowPayload.response_text_edited = '';
-    const content = {};
-    if (math.length) content.math = math;
-    if (sketch) content.sketch = sketch;
-    rowPayload.response_content = JSON.stringify(content);
-    if (rowPayload.response_content.length > CONTENT_MAX_CHARS) throw new Error('Your answer is too large to save. Try a simpler drawing.');
-    ensureHeaderColumn_(getResponsesSheet(), 'response_content');
-    return { ok: true, response_id: writeResponse_(rowPayload) };
-  }
-
-  // Text activity
-  if (math.length || cleanSketch_(payload.sketch)) throw new Error('This activity takes text only. Please reload the page.');
+  // Only the parts this activity allows
+  const reload = ' Please reload the page.';
+  if (text && !kind.text) throw new Error('This activity doesn\'t take text.' + reload);
+  if (math.length && !kind.math) throw new Error('This activity doesn\'t take equations.' + reload);
+  if (sketch && !kind.sketch) throw new Error('This activity doesn\'t take a drawing.' + reload);
+  if (!text && !math.length && !sketch) throw new Error(emptyAnswerMessage_(kind));
   const words = text.split(/\s+/).filter(Boolean);
-  if (!text) throw new Error('Please enter a response.');
   if (settings.max_words && words.length > settings.max_words) {
     throw new Error(`Please keep to ${settings.max_words} words.`);
   }
-  if (text.length < settings.min_chars) {
-    throw new Error('Response too short.');
+  if (!sketch && (text + math.join('')).length < settings.min_chars) throw new Error('Response too short.');
+
+  // Text: a listed term is masked, flagged or blocked (profanity_action)
+  let maskedText = '';
+  let flag = 'NONE';
+  if (text && hasProfanity(text, profList)) {
+    if (action === 'block') throw new Error('Your response contains disallowed terms.');
+    if (action === 'mask') { maskedText = maskProfanity(text, profList); flag = 'MASKED'; }
+    else flag = 'FLAGGED';
+  }
+  // Equations can't be masked without breaking them: a listed term is blocked or flagged.
+  // Drawings can't be checked.
+  if (math.length && hasProfanity(math.join(' '), profList)) {
+    if (action === 'block') throw new Error('Your response contains disallowed terms.');
+    flag = 'FLAGGED';
+  }
+  rowPayload.profanity_flag = flag;
+  rowPayload.response_text_edited = maskedText;
+
+  if (!math.length && !sketch) {
+    // Text only: stored as text activities always have been
+    rowPayload.response_text_original = text;
+    return { ok: true, response_id: writeResponse_(rowPayload) };
   }
 
-  // Profanity handling
-  let response_text_masked = text;
-  let profanity_flag = 'NONE';
-  if (hasProfanity(text, profList)) {
-    if (action === 'block') {
-      throw new Error('Your response contains disallowed terms.');
-    } else if (action === 'mask') {
-      response_text_masked = maskProfanity(text, profList);
-      profanity_flag = 'MASKED';
-    } else {
-      profanity_flag = 'FLAGGED';
-    }
-  }
-  rowPayload.response_text_original = text;
-  rowPayload.response_text_edited = (profanity_flag === 'MASKED') ? response_text_masked : '';
-  rowPayload.profanity_flag = profanity_flag;
+  // Equations and/or a drawing (maybe with text) go in response_content
+  const readable = [];
+  if (text) readable.push(text);
+  math.forEach(l => readable.push('$$' + l + '$$'));
+  if (sketch) readable.push(`[drawing: ${sketch.s.length} line${sketch.s.length === 1 ? '' : 's'}]`);
+  rowPayload.response_text_original = readable.join('\n');
+  const content = {};
+  if (text) content.text = text;
+  if (math.length) content.math = math;
+  if (sketch) content.sketch = sketch;
+  rowPayload.response_content = JSON.stringify(content);
+  if (rowPayload.response_content.length > CONTENT_MAX_CHARS) throw new Error('Your answer is too large to save. Try a simpler drawing.');
+  ensureHeaderColumn_(getResponsesSheet(), 'response_content');
   return { ok: true, response_id: writeResponse_(rowPayload) };
+}
+
+/** What to say when a student submits nothing, e.g. "Please add text, an equation or a drawing." */
+function emptyAnswerMessage_(kind) {
+  if (kind.text && !kind.math && !kind.sketch) return 'Please enter a response.';
+  if (!kind.text && !kind.math) return 'Please draw something.';
+  const opts = [];
+  if (kind.text) opts.push('text');
+  if (kind.math) opts.push('an equation');
+  if (kind.sketch) opts.push('a drawing');
+  return 'Please add ' + (opts.length > 1 ? opts.slice(0, -1).join(', ') + ' or ' + opts[opts.length - 1] : opts[0]) + '.';
 }
 
 /** Legacy student API (fallback used by student.html when apiSubmitResponse fails).

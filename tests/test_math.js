@@ -35,11 +35,11 @@ eq('response_content column added', sheetRows('Responses')[0].includes('response
 let row = lastRow();
 eq('equations stored as JSON (blank lines dropped)', JSON.parse(row.response_content), { math: ['\\bar{x} = 4.2', 's^2 = 1.1'] });
 eq('readable copy in response_text_original', row.response_text_original, '$$\\bar{x} = 4.2$$\n$$s^2 = 1.1$$');
-throws('text refused in a math activity', () => submit('m1', 'some words', ['x = 1']), /not text/);
+throws('text refused in a math activity', () => submit('m1', 'some words', ['x = 1']), /doesn't take text/);
 throws('no equations rejected', () => submit('m1', '', ['', ' ']), /add an equation/);
 throws('more than 10 lines rejected', () => submit('m1', '', Array(11).fill('x')), /at most 10/);
 throws('very long equation rejected', () => submit('m1', '', ['x'.repeat(1001)]), /too long/);
-throws('equations refused in a text activity', () => submit('t1', 'hi', ['x=1']), /text only/);
+throws('equations refused in a text activity', () => submit('t1', 'hi', ['x=1']), /doesn't take equations/);
 eq('text activity unchanged: no response_content', [submit('t1', 'plain answer').ok, lastRow().response_content], [true, '']);
 
 // --- Profanity: equations are flagged (masking would break them), or blocked ---

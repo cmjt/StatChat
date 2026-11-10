@@ -99,3 +99,19 @@ __SERVER.apiStopSession(tok, 'both1');
 __SERVER.apiStopSession(tok, 'draw1');
 pollView();
 eq('stopped: pad hidden and disabled', [shown('sketchSection'), SKETCH_ENABLED], [false, false]);
+
+// Text, math & drawing: all three shown; any of them can be sent, together or alone
+__SERVER.apiStartSession(tok, 'all1', 63, { submission_type: 'text_math_sketch', peer_review: false });
+pollView();
+eq('all three shown', [el('textSection').style.display, shown('mathSection'), shown('sketchSection')], ['block', true, true]);
+submitResponse();
+eq('nothing entered: says what can be added', el('status').textContent, 'Please add text, an equation or a drawing.');
+el('responseText').value = 'my answer';
+MATH_FIELDS[0].field.value = 'z = 1';
+draw([[5, 5], [50, 50]]);
+submitResponse();
+eq('all three sent together', stored().slice(-1)[0], { text: 'my answer', math: ['z = 1'], sketch: { v: 1, bg: 'blank', s: [[1, 5, 5, 45, 45]] } });
+eq('all three cleared', [el('responseText').value, MATH_FIELDS[0].field.value, SKETCH_STROKES.length], ['', '', 0]);
+el('responseText').value = 'just words';
+submitResponse();
+eq('text alone is fine', sheetObjects('Responses').slice(-1)[0].response_text_original, 'just words');

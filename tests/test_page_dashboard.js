@@ -10,14 +10,19 @@ setSheets({
   Settings: [['key', 'value']],
   ProfanityList: [['badword']],
 });
-// The two login questions: what students submit, and whether there's peer review
-let chosen = { submissionType: 'text', peerReview: 'false', sketchBackground: 'blank' };
+// The login questions: what students submit (checkboxes), peer review and background
+let chosen = { peerReview: 'false', sketchBackground: 'blank' };
 document.querySelector = sel => {
   const m = /^input\[name="(\w+)"\]:checked$/.exec(sel);
   return m && chosen[m[1]] !== undefined ? { value: chosen[m[1]] } : null;
 };
+function tick(type) {   // type: parts joined by '_', e.g. 'text_math'
+  const parts = String(type || '').split('_');
+  el('partText').checked = parts.includes('text'); el('partMath').checked = parts.includes('math'); el('partSketch').checked = parts.includes('sketch');
+}
 function login(sessionId, preset, type, background) {
-  chosen = { submissionType: type || 'text', peerReview: preset === 'peer' ? 'true' : 'false', sketchBackground: background || 'blank' };
+  chosen = { peerReview: preset === 'peer' ? 'true' : 'false', sketchBackground: background || 'blank' };
+  tick(type || 'text');
   el('inst').value = 'i1'; el('instPw').value = 'pw1'; el('newSessionId').value = sessionId; el('sessionDuration').value = '45';
   handleLoginAndStart();
 }
@@ -89,10 +94,10 @@ eq('revert: student\'s answer again, not marked', [RESPONSES[0].math, RESPONSES[
 login('maths2', 'peer', 'math');
 eq('math with peer review: label', el('activityLabel').textContent, 'Peer review · math');
 
-// Drawing: background question appears only for drawing types; drawings on cards; enlarge
+tick('sketch'); updateLoginOptions();
 chosen.submissionType = 'sketch'; updateLoginOptions();
 eq('drawing chosen: background question shown', el('backgroundPicker').style.display, '');
-chosen.submissionType = 'math'; updateLoginOptions();
+tick('math'); updateLoginOptions();
 eq('math chosen: background question hidden', el('backgroundPicker').style.display, 'none');
 login('draw1', 'respond', 'sketch', 'axes');
 eq('drawing: label and background', [el('activityLabel').textContent, SESSION_STATE.settings.background], ['Quick response · drawing', 'axes']);
@@ -110,3 +115,12 @@ __SERVER.apiSubmitResponse('both1', { math: ['x=1'], sketch: { v: 1, bg: 'grid',
 loadResponses();
 const both = RESPONSES.find(r => r.math.length && r.sketch);
 eq('math & drawing card: equations to correct, and the drawing', [!!both, el('listView').children.some(c => c.innerHTML.includes('mathSlot') && c.innerHTML.includes('sketchBlock'))], [true, true]);
+
+// Combinations: background question follows the Drawing box; nothing ticked is refused
+tick('text_sketch'); updateLoginOptions();
+eq('text & drawing: background question shown', el('backgroundPicker').style.display, '');
+login('combo1', 'respond', 'text_math_sketch');
+eq('all three: label', el('activityLabel').textContent, 'Quick response · text, math & drawing');
+el('startMsg').textContent = '';
+tick(''); handleLoginAndStart();
+eq('nothing ticked: asked to tick one', el('startMsg').textContent, 'Tick at least one thing for students to submit.');

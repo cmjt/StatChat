@@ -32,23 +32,20 @@
           <input id="newSessionId" placeholder="e.g., week_01_lec_02" style="flex:1;">
         </div>
         <fieldset class="presetPicker">
-          <legend>Students submit</legend>
+          <legend>Students submit <small>(tick one or more)</small></legend>
           <label class="presetOption">
-            <input type="radio" name="submissionType" value="text" checked onchange="updateLoginOptions()">
+            <input type="checkbox" id="partText" value="text" checked onchange="updateLoginOptions()">
             <span><b>Text</b><br><small>Short written answers or poll replies.</small></span>
           </label>
           <label class="presetOption">
-            <input type="radio" name="submissionType" value="math" onchange="updateLoginOptions()">
-            <span><b>Math</b><br><small>Typed equations only (no text), using an equation editor with a maths keyboard on phones and tablets. Click an answer on the board to correct it.</small></span>
+            <input type="checkbox" id="partMath" value="math" onchange="updateLoginOptions()">
+            <span><b>Math</b><br><small>Typed equations, using an equation editor with a maths keyboard on phones and tablets. Click an answer on the board to correct it.</small></span>
           </label>
           <label class="presetOption">
-            <input type="radio" name="submissionType" value="sketch" onchange="updateLoginOptions()">
+            <input type="checkbox" id="partSketch" value="sketch" onchange="updateLoginOptions()">
             <span><b>Drawing</b><br><small>Students draw with a finger, stylus or mouse, e.g. "sketch the shape of this distribution". Click a drawing on the board to enlarge it.</small></span>
           </label>
-          <label class="presetOption">
-            <input type="radio" name="submissionType" value="math_sketch" onchange="updateLoginOptions()">
-            <span><b>Math &amp; drawing</b><br><small>Equations and/or a drawing in the same answer.</small></span>
-          </label>
+          <small>With more than one ticked, students can answer with any or all of them.</small>
         </fieldset>
         <fieldset class="presetPicker" id="backgroundPicker" style="display:none;">
           <legend>Draw on</legend>

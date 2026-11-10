@@ -13,19 +13,23 @@ When opening a session, the instructor answers two questions:
 
 | Question | Choices |
 |---|---|
-| **Students submit** | **Text**: short written answers or poll replies. **Math**: typed equations. **Drawing**: a sketch drawn with a finger, stylus or mouse. **Math & drawing**: equations and/or a drawing |
-| **Draw on** (drawing types only) | **Blank**, **Grid** or **Axes** |
+| **Students submit** (tick one or more) | **Text**: short written answers or poll replies. **Math**: typed equations. **Drawing**: a sketch drawn with a finger, stylus or mouse |
+| **Draw on** (when Drawing is ticked) | **Blank**, **Grid** or **Axes** |
 | **Peer review** | **Off**: responses are shown live as cards and charts, and peer review controls are hidden. **On**: after writing, students review classmates' answers when the instructor opens the review |
 
-The activity is named from the answers, e.g. *Quick response*, *Peer review ·
-math* or *Quick response · drawing*. Math and drawing activities have no text
-box.
+Any combination of Text, Math and Drawing can be ticked. Students get a text
+box, equation lines and/or a drawing pad (in that order) for the ticked parts,
+and must fill in at least one of them; they can fill in any or all.
 
-Each session stores the answers in Sessions columns `submission_type` (`text`,
-`math`, `sketch` or `math_sketch`), `peer_review` (`TRUE`/`FALSE`) and
+The activity is named from the answers, e.g. *Quick response*, *Peer review ·
+math* or *Quick response · text, math & drawing*.
+
+Each session stores the answers in Sessions columns `submission_type` (the
+ticked parts joined by `_`, always in the order `text`, `math`, `sketch`: e.g.
+`text`, `math_sketch` or `text_math_sketch`), `peer_review` (`TRUE`/`FALSE`) and
 `sketch_background` (`blank`, `grid` or `axes`), all added automatically. The
 server enforces them: peer review can't be opened when it's off, and each
-activity accepts only its own kind of answer. Logging in again with different answers changes
+activity accepts only the parts that were ticked. Logging in again with different answers changes
 them, except while the session is in peer review. Sessions created before
 activities existed behave as text with peer review, as they did before.
 
@@ -53,9 +57,13 @@ to 10, which they can add or remove (for example, one step of working per line).
   `{"math": ["\\bar{x} = 4.2", ...], "math_edited": [...]}`. `math` is what
   the student submitted and never changes; `math_edited` is your correction, if
   any. `response_text_original` also gets a readable copy of the submission,
-  with each equation as `$$...$$`.
-- **Poll view:** math answers are tallied by their last line (the final
-  answer), ignoring spaces. Drawings aren't tallied.
+  with each equation as `$$...$$`. When the student also wrote text, it's kept
+  as `"text"` in the same JSON (a masked or edited version goes in
+  `response_text_edited`, as for text-only answers). An answer that is only
+  text is stored exactly as in a text activity.
+- **Poll view:** answers with equations are tallied by their last line (the
+  final answer), ignoring spaces; other answers by their text. Drawings aren't
+  tallied.
 - **Profanity:** equations can't be masked without breaking them, so a listed
   term inside one is blocked (with `profanity_action` = `block`) or otherwise
   flagged.
@@ -72,9 +80,9 @@ first-quadrant axes for sketching distributions, scatterplots and curves).
 - **In class:** drawings appear on the dashboard cards straight away, like
   written answers. Click a drawing to enlarge it, e.g. for the projector (Esc or
   ✕ closes it). Students see drawings the same way in peer review.
-- **Math & drawing:** students get both the equation lines and the pad, and
-  can submit either or both. You can correct the equations as usual; drawings
-  can't be edited, but you can hide the card.
+- **With other parts:** when Math and/or Text are also ticked, students can
+  submit any of them. You can correct the equations and edit the text as usual;
+  drawings can't be edited, but you can hide the card.
 - **Storage:** a drawing is stored as pen strokes, not an image, in the
   `sketch` field of `response_content`:
   `{"v": 1, "bg": "axes", "s": [[colour, x0, y0, dx1, dy1, ...], ...]}` on a
@@ -282,7 +290,7 @@ Recommended columns (features that use them are skipped if they're missing):
 - peer_opened_at — needed for students to see a peer review after the session ends
 - peer_required_reviews
 - peer_until — review deadline (added automatically when peer review is opened)
-- submission_type — `text`, `math`, `sketch` or `math_sketch` (added automatically; see [Activities](#activities))
+- submission_type — the ticked parts, e.g. `text`, `math_sketch` or `text_math_sketch` (added automatically; see [Activities](#activities))
 - peer_review — `TRUE`/`FALSE` (added automatically)
 - sketch_background — `blank`, `grid` or `axes` (added automatically)
 
