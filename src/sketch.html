@@ -2,7 +2,8 @@
        enlarged view. A drawing is pen strokes on a 600 x 400 canvas in whole units:
          { v: 1, bg: 'axes', s: [[colour, x0, y0, dx1, dy1, ...], ...] }
        (each later point is a step from the one before). A drawing on a figure has
-       bg: 'image' and img: the figure's address, added by the server. Src/Responses.gs checks the same
+       bg: 'image' and, added by the server, fig: an uploaded figure's ID or img: a linked
+       figure's address. Uploaded figures are fetched with apiGetFigure and kept here. Src/Responses.gs checks the same
        format and limits. -->
   <style>
     .sketchSvg { display:block; width:100%; height:auto; background:#fff; border:1px solid #d0d5dd; border-radius:6px; }
@@ -29,6 +30,38 @@
       if (drive) return 'https://drive.google.com/thumbnail?id=' + (drive[1] || drive[2]) + '&sz=w1600';
       return /^https:\/\/[^\s"'<>\\`]+$/i.test(url) ? url : '';
     }
+    // --- Uploaded figures: fetched once per page, then reused ---
+    const SKETCH_FIGURES = Object.create(null);   // id -> { data: 'data:image/...' | '', failed, waiters: [fn] }
+    const SKETCH_FIGURE_ID_RE = /^[\w-]{10,200}$/;
+    const SKETCH_DATA_URL_RE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+\/]+={0,2}$/;
+    /** Call done(ok) once figure id has loaded (or failed). Fetches it if needed. Images
+     *  already drawn with sketchBackgroundSVG get it filled in automatically. */
+    function loadSketchFigure(id, done){
+      if (!SKETCH_FIGURE_ID_RE.test(String(id || ''))) { if (done) done(false); return; }
+      let f = SKETCH_FIGURES[id];
+      if (f && (f.data || f.failed)) { if (done) done(!!f.data); return; }
+      if (f) { if (done) f.waiters.push(done); return; }
+      f = SKETCH_FIGURES[id] = { data: '', failed: false, waiters: done ? [done] : [] };
+      const finish = (data) => {
+        if (data && SKETCH_DATA_URL_RE.test(data)) {
+          f.data = data;
+          document.querySelectorAll('image[data-fig="' + id + '"]').forEach(el => el.setAttribute('href', data));
+        } else f.failed = true;
+        const ws = f.waiters; f.waiters = [];
+        ws.forEach(fn => fn(!!f.data));
+      };
+      google.script.run
+        .withSuccessHandler(res => finish(res && res.ok ? res.data : ''))
+        .withFailureHandler(() => finish(''))
+        .apiGetFigure(id);
+    }
+    /** Let an uploaded figure be shown at once, without fetching it (e.g. just uploaded) */
+    function rememberSketchFigure(id, data){
+      if (SKETCH_FIGURE_ID_RE.test(String(id || '')) && SKETCH_DATA_URL_RE.test(String(data || ''))) {
+        SKETCH_FIGURES[id] = { data, failed: false, waiters: [] };
+      }
+    }
+
     /** An image address made safe for an HTML/SVG attribute (or '' if it isn't https) */
     function sketchImageAttr(url){
       const u = /^https:\/\/[^\s"'<>\\`]+$/i.test(String(url || '')) ? String(url) : '';
@@ -101,13 +134,21 @@
       const colour = SKETCH_COLOURS[st.c] || SKETCH_COLOURS[0];
       return `<path d="${strokePathD(st.pts)}" stroke="${colour}" stroke-width="${SKETCH_STROKE_W}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
-    /** The background as SVG markup (numbers, fixed strings and a checked https address).
-     *  img is the figure's address when bg is 'image'; it's fitted inside the canvas. */
-    function sketchBackgroundSVG(bg, img){
+    /** The background as SVG markup (numbers, fixed strings, a checked https address or a
+     *  checked image data URL). For bg 'image', fig is an uploaded figure's ID (fetched if
+     *  needed, and filled in when it arrives) or img a linked figure's address. The figure is
+     *  fitted inside the canvas. */
+    function sketchBackgroundSVG(bg, img, fig){
       let out = `<rect x="0" y="0" width="${SKETCH_W}" height="${SKETCH_H}" fill="#fff"/>`;
-      const href = bg === 'image' ? sketchImageAttr(img) : '';
-      if (href) {
-        out += `<image href="${href}" x="0" y="0" width="${SKETCH_W}" height="${SKETCH_H}" preserveAspectRatio="xMidYMid meet"/>`;
+      const fit = `x="0" y="0" width="${SKETCH_W}" height="${SKETCH_H}" preserveAspectRatio="xMidYMid meet"`;
+      const figId = bg === 'image' && SKETCH_FIGURE_ID_RE.test(String(fig || '')) ? String(fig) : '';
+      const href = bg === 'image' && !figId ? sketchImageAttr(img) : '';
+      if (figId) {
+        const f = SKETCH_FIGURES[figId];
+        if (!f) loadSketchFigure(figId);
+        out += `<image data-fig="${figId}" href="${f && f.data ? f.data : ''}" ${fit}/>`;
+      } else if (href) {
+        out += `<image href="${href}" ${fit}/>`;
       } else if (bg === 'grid') {
         let d = '';
         for (let x = 25; x < SKETCH_W; x += 25) d += `M${x} 0V${SKETCH_H}`;
@@ -131,7 +172,7 @@
       const bg = SKETCH_BACKGROUNDS.indexOf(sketch && sketch.bg) >= 0 ? sketch.bg : 'blank';
       const strokes = (sketch && Array.isArray(sketch.s)) ? sketch.s : [];
       return `<svg class="${cls || 'sketchSvg'}" viewBox="0 0 ${SKETCH_W} ${SKETCH_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Drawing">`
-        + sketchBackgroundSVG(bg, sketch && sketch.img) + strokes.map(a => strokeSVG(decodeStroke(a))).join('') + '</svg>';
+        + sketchBackgroundSVG(bg, sketch && sketch.img, sketch && sketch.fig) + strokes.map(a => strokeSVG(decodeStroke(a))).join('') + '</svg>';
     }
     function hasSketch(sketch){ return !!(sketch && Array.isArray(sketch.s) && sketch.s.length); }
 

@@ -41,7 +41,8 @@ function writeResponse_(payload) {
 //
 // A drawing ("sketch") is pen strokes on a SKETCH_W x SKETCH_H canvas, in whole units:
 //   {"v": 1, "bg": "axes", "s": [[colour, x0, y0, dx1, dy1, dx2, dy2, ...], ...]}
-// A drawing on a figure has "bg": "image" and "img": the figure's address.
+// A drawing on a figure has "bg": "image" and either "fig": an uploaded figure's ID
+// (Figures.gs) or "img": a linked figure's address.
 // Each stroke is a colour index then its first point, then each next point as a step from
 // the previous one, which keeps drawings small enough for a Sheets cell (50,000 characters).
 const MATH_MAX_LINES = 10;
@@ -90,7 +91,8 @@ function cleanSketch_(sketch, activity) {
   if (points > SKETCH_MAX_POINTS) throw big();
   const out = { v: 1, bg: SKETCH_BACKGROUNDS.indexOf(sketch.bg) >= 0 ? sketch.bg : 'blank', s: strokes };
   if (out.bg === 'image') {
-    if (activity && activity.background === 'image' && activity.background_url) out.img = activity.background_url;
+    if (activity && activity.background === 'image' && activity.background_figure) out.fig = activity.background_figure;
+    else if (activity && activity.background === 'image' && activity.background_url) out.img = activity.background_url;
     else out.bg = 'blank';
   }
   if (JSON.stringify(out).length > SKETCH_MAX_CHARS) throw big();

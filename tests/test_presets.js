@@ -44,7 +44,7 @@ throws('blank session id rejected', () => apiStartSession(token, '  ', 60, 'resp
 throws('instructor calls need a valid token', () => apiStartSession('bogus', 'q3', 60, 'respond'), /expired/);
 
 // Legacy sessions (blank settings) behave as before: text + peer review allowed
-eq('legacy session: peer allowed', getSessionSettings_({ submission_type: '', peer_review: '' }), { submission_type: 'text', peer_review: true, preset: 'peer', label: 'Peer review', background: 'blank', background_url: '' });
+eq('legacy session: peer allowed', getSessionSettings_({ submission_type: '', peer_review: '' }), { submission_type: 'text', preset: 'peer', label: 'Peer review', peer_review: true, background: 'blank', background_url: '', background_figure: '' });
 
 // Cache really serves repeat polls, and instructor actions invalidate it
 const before = apiGetStudentView('i1');

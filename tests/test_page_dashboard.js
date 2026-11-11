@@ -140,3 +140,32 @@ eq('bad address: login stops with a reason', el('startMsg').textContent, 'The fi
 el('sketchImageUrl').value = 'https://example.org/f.png';
 login('fig1', 'respond', 'sketch', 'image');
 eq('good address: session uses the figure', [SESSION_STATE.settings.background, SESSION_STATE.settings.background_url], ['image', 'https://example.org/f.png']);
+
+// Uploaded figure (pasted screenshot) at login: saved to Drive, then the session uses it
+const SHOT = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+setLoginFigure(SHOT);
+eq('pasted image previewed', [el('figurePreview').src, el('loginFigureClear').style.display], [SHOT, '']);
+el('sketchImageUrl').value = 'https://example.org/ignored.png';
+login('shot1', 'respond', 'text_sketch', 'image');
+const shotFig = SESSION_STATE.settings.background_figure;
+eq('session uses the uploaded figure, not the link', [SESSION_STATE.settings.background, !!shotFig, SESSION_STATE.settings.background_url], ['image', true, '']);
+eq('dashboard already has the image (no refetch needed)', SKETCH_FIGURES[shotFig].data, SHOT);
+eq('figure button shown for drawing activities', el('figureBtn').style.display, '');
+clearLoginFigure();
+eq('removing the pasted image', [LOGIN_FIGURE, el('loginFigureClear').style.display], ['', 'none']);
+
+// Live: paste a new screenshot into the panel and show it to students
+toggleFigurePanel(true);
+eq('panel shows the current figure', el('figureCurrent').innerHTML.includes('data-fig="' + shotFig + '"'), true);
+setLiveFigure({ data: SHOT });
+eq('ready to show', el('liveFigureShow').disabled, false);
+showLiveFigure();
+const liveFig = SESSION_STATE.settings.background_figure;
+eq('new figure live for students', [!!liveFig, liveFig !== shotFig, __SERVER.apiGetSessionState(AUTH_TOKEN, 'shot1').settings.background_figure === liveFig], [true, true, true]);
+eq('confirmation shown', el('liveFigureMsg').textContent.startsWith('Shown to students'), true);
+clearSessionFigure();
+eq('blank page', SESSION_STATE.settings.background, 'blank');
+el('liveFigureUrl').value = 'https://example.org/live.png'; liveFigureUrlChanged();
+eq('link in the panel previews', el('liveFigurePreview').src, 'https://example.org/live.png');
+login('txtonly', 'respond', 'text');
+eq('no figure button without drawing', el('figureBtn').style.display, 'none');

@@ -54,6 +54,56 @@ const Utilities = {
   base64Encode: bytes => bytes.map(b => (b & 255).toString(16).padStart(2, '0')).join(''),
 };
 const Logger = { log: () => {} };
+// Real base64 for figure bytes (node and gjs alike). The digest stand-in above keeps its own
+// encoding: only byte arrays from a blob (marked __b64) are base64-encoded for real.
+const __B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function __b64dec(str) {
+  const clean = String(str).replace(/=+$/, ''), out = [];
+  let bits = 0, acc = 0;
+  for (const ch of clean) { acc = (acc << 6) | __B64.indexOf(ch); bits += 6; if (bits >= 8) { bits -= 8; out.push((acc >> bits) & 255); } }
+  return out;
+}
+function __b64enc(bytes) {
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);
+    out += __B64[(n >> 18) & 63] + __B64[(n >> 12) & 63] + (i + 1 < bytes.length ? __B64[(n >> 6) & 63] : '=') + (i + 2 < bytes.length ? __B64[n & 63] : '=');
+  }
+  return out;
+}
+Utilities.base64Decode = __b64dec;
+Utilities.base64Encode = (orig => bytes => (bytes && bytes.__b64) ? __b64enc(bytes) : orig(bytes))(Utilities.base64Encode);
+Utilities.formatDate = d => d.toISOString();
+Utilities.newBlob = (bytes, type, name) => ({ bytes, type, name, getBytes: () => Object.assign(bytes.slice(), { __b64: true }), getContentType: () => type });
+const Session = { getScriptTimeZone: () => 'Europe/London' };
+const __props = new Map();
+const PropertiesService = { getScriptProperties: () => ({
+  getProperty: k => (__props.has(k) ? __props.get(k) : null), setProperty: (k, v) => { __props.set(k, String(v)); },
+}) };
+// A tiny fake Drive: folders and files with parents. Files outside StatChat's folder can exist.
+const __drive = new Map();
+let __driveN = 0;
+function __iter(list) { let i = 0; return { hasNext: () => i < list.length, next: () => list[i++] }; }
+function __driveItem(kind, name, parent, blob) {
+  const id = kind + '_' + String(++__driveN).padStart(12, '0');
+  const item = {
+    kind, name, parent, blob, trashed: false,
+    getId: () => id, getName: () => name, isTrashed: () => item.trashed,
+    getParents: () => __iter(parent ? [__drive.get(parent)] : []),
+    getBlob: () => blob,
+    createFolder: n => __driveItem('folder', n, id),
+    createFile: b => __driveItem('file', b.name, id, b),
+    getFoldersByName: n => __iter([...__drive.values()].filter(x => x.kind === 'folder' && x.parent === id && x.name === n)),
+  };
+  __drive.set(id, item);
+  return item;
+}
+const __driveRoot = __driveItem('folder', 'My Drive', null);
+const DriveApp = {
+  createFolder: n => __driveRoot.createFolder(n),
+  getFolderById: id => { const f = __drive.get(id); if (!f || f.kind !== 'folder') throw new Error('No folder'); return f; },
+  getFileById: id => { const f = __drive.get(id); if (!f || f.kind !== 'file') throw new Error('No file'); return f; },
+};
 
 // ---- Helpers ----
 const H = hours => new Date(Date.now() + hours * 3600e3);

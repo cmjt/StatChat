@@ -7,7 +7,8 @@
     let SKETCH_COLOUR = 0;
     let SKETCH_ENABLED = false;
     let SKETCH_BG = 'blank';
-    let SKETCH_IMG = '';          // the figure's address when drawing on a figure
+    let SKETCH_IMG = '';          // a linked figure's address, when drawing on one
+    let SKETCH_FIG = '';          // an uploaded figure's ID, when drawing on one
     let SKETCH_LIVE = null;       // points of the stroke being drawn
     let SKETCH_ERASED = null;     // strokes removed by the current eraser drag
     let SKETCH_POINTER = null;    // pointerId being followed (one finger/pen at a time)
@@ -25,20 +26,29 @@
       if (show) {
         ensureSketchPad();
         const bg = (SETTINGS && SETTINGS.background) || 'blank';
-        const img = bg === 'image' ? String((SETTINGS && SETTINGS.background_url) || '') : '';
-        if (bg !== SKETCH_BG || img !== SKETCH_IMG) {
-          SKETCH_BG = bg; SKETCH_IMG = img;
-          SKETCH_PAD.bg.innerHTML = sketchBackgroundSVG(bg, img);
-          checkSketchFigure(img);
+        const fig = bg === 'image' ? String((SETTINGS && SETTINGS.background_figure) || '') : '';
+        const img = bg === 'image' && !fig ? String((SETTINGS && SETTINGS.background_url) || '') : '';
+        if (bg !== SKETCH_BG || img !== SKETCH_IMG || fig !== SKETCH_FIG) {
+          SKETCH_BG = bg; SKETCH_IMG = img; SKETCH_FIG = fig;
+          SKETCH_PAD.bg.innerHTML = sketchBackgroundSVG(bg, img, fig);
+          checkSketchFigure(img, fig);
         }
       }
       setSketchEnabled(show && canWrite);
     }
 
     /** Tell the student if the figure to draw on can't be loaded (they can still draw) */
-    function checkSketchFigure(img){
+    function checkSketchFigure(img, fig){
       const note = document.getElementById('sketchFigureNote');
       note.style.display = 'none';
+      if (fig) {
+        loadSketchFigure(fig, ok => {
+          if (fig !== SKETCH_FIG) return;
+          note.style.display = ok ? 'none' : 'block';
+          if (ok && SKETCH_PAD) SKETCH_PAD.bg.innerHTML = sketchBackgroundSVG(SKETCH_BG, SKETCH_IMG, fig);
+        });
+        return;
+      }
       if (!img || typeof Image !== 'function') return;
       const probe = new Image();
       probe.onload = () => { if (img === SKETCH_IMG) note.style.display = 'none'; };

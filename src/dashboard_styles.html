@@ -167,4 +167,10 @@
     .mathEditBtn { border:1px solid #00539b; background:#fff; color:#00539b; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.85rem; }
     .mathEditBtn:hover { background:#00539b; color:#fff; }
     .mathEditStatus { color:#b42318; }
-  </style>
+      /* Figures to draw on: paste/choose area and previews */
+    .figureDrop { border:2px dashed #b6bfcc; border-radius:8px; padding:14px; text-align:center; cursor:pointer; background:#f9fafb; }
+    .figureDrop:focus, .figureDrop:hover, .figureDrop.over { border-color:#1d4ed8; background:#eff6ff; outline:none; }
+    .figurePreview { display:block; margin-top:6px; max-width:300px; width:100%; aspect-ratio:3/2; object-fit:contain; border:1px solid #d0d5dd; border-radius:6px; background:#fff; }
+    .figurePanelRow { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; }
+    .figureThumb { width:240px; max-width:100%; }
+</style>

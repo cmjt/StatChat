@@ -63,8 +63,9 @@ function parseDeadline_(iso) {
 //                    one of the chosen parts.
 //   peer_review:     whether the session can have a peer review phase
 //   background:      what drawings are made on: 'blank', 'grid', 'axes' or 'image' (a figure
-//                    from background_url, for students to annotate). Drawing types only.
-//   background_url:  the figure's address when background is 'image', else ''
+//                    for students to annotate). Drawing types only.
+//   background_figure: an uploaded figure's ID (see Figures.gs) when background is 'image'
+//   background_url:  otherwise, the figure's web address when background is 'image', else ''
 // PRESETS are the older single-choice names, still accepted by apiStartSession.
 const SUBMISSION_PARTS = ['text', 'math', 'sketch'];
 const SUBMISSION_PART_NAMES = { text: 'text', math: 'math', sketch: 'drawing' };
@@ -122,18 +123,21 @@ function resolveActivity_(activity) {
     if (!type) throw new Error('Unknown submission type: ' + activity.submission_type);
     const bg = String(activity.background || 'blank').trim().toLowerCase();
     if (SKETCH_BACKGROUNDS.indexOf(bg) === -1) throw new Error('Unknown drawing background: ' + activity.background);
-    let url = '';
-    if (bg === 'image') {
+    let url = '', fig = '';
+    if (bg === 'image' && activity.background_figure) {
+      fig = String(activity.background_figure);
+      if (!isFigureId_(fig)) throw new Error('Figure not found. Please add it again.');
+    } else if (bg === 'image') {
       url = normalizeImageUrl_(activity.background_url);
       if (!url) throw new Error(String(activity.background_url || '').trim()
         ? 'The figure address must be a web link starting with https://.'
-        : 'Enter the address (URL) of the figure for students to draw on.');
+        : 'Add a figure for students to draw on: paste or choose an image, or enter its address.');
     }
-    return { submission_type: type, peer_review: prBool(activity.peer_review), background: bg, background_url: url };
+    return { submission_type: type, peer_review: prBool(activity.peer_review), background: bg, background_url: url, background_figure: fig };
   }
   const key = String(activity || DEFAULT_PRESET).trim().toLowerCase();
   if (!PRESETS[key]) throw new Error('Unknown activity type: ' + activity);
-  return { submission_type: PRESETS[key].submission_type, peer_review: PRESETS[key].peer_review, background: 'blank', background_url: '' };
+  return { submission_type: PRESETS[key].submission_type, peer_review: PRESETS[key].peer_review, background: 'blank', background_url: '', background_figure: '' };
 }
 
 /** A session's activity settings. Sessions created before settings existed have blank
@@ -146,10 +150,13 @@ function getSessionSettings_(session) {
   const peer = (rawPeer === '' || rawPeer === undefined || rawPeer === null) ? true : prBool(rawPeer);
   const rawBg = String((session && session.sketch_background) || '').trim().toLowerCase();
   let background = SKETCH_BACKGROUNDS.indexOf(rawBg) >= 0 ? rawBg : 'blank';
-  const background_url = background === 'image' ? normalizeImageUrl_(session && session.sketch_image_url) : '';
-  if (background === 'image' && !background_url) background = 'blank';   // figure address missing or unusable
-  if (!type) return { submission_type: rawType, peer_review: peer, preset: '', label: 'Custom', background, background_url };
-  return { submission_type: type, peer_review: peer, preset: peer ? 'peer' : 'respond', label: activityLabel_(type, peer), background, background_url };
+  const rawFig = String((session && session.sketch_figure_id) || '').trim();
+  const background_figure = background === 'image' && isFigureId_(rawFig) ? rawFig : '';
+  const background_url = background === 'image' && !background_figure ? normalizeImageUrl_(session && session.sketch_image_url) : '';
+  if (background === 'image' && !background_url && !background_figure) background = 'blank';   // figure missing or unusable
+  const common = { peer_review: peer, background, background_url, background_figure };
+  if (!type) return Object.assign({ submission_type: rawType, preset: '', label: 'Custom' }, common);
+  return Object.assign({ submission_type: type, preset: peer ? 'peer' : 'respond', label: activityLabel_(type, peer) }, common);
 }
 
 // ===== Student view cache =====
@@ -174,7 +181,7 @@ function getPhaseForSession(session) {
 // All functions here take a login token (from apiInstructorLogin) as their first argument.
 
 /** Start (or reopen) a session. activity is { submission_type, peer_review, background,
- *  background_url } or a preset
+ *  background_url, background_figure } or a preset
  *  name ('respond' | 'peer'). A session in its peer review phase keeps its settings, so a
  *  review isn't stranded. */
 function apiStartSession(token, session_id, duration_mins, activity){
@@ -183,12 +190,14 @@ function apiStartSession(token, session_id, duration_mins, activity){
   if (!inst) throw new Error('Instructor not found.');
   if (!String(session_id || '').trim()) throw new Error('Enter a session ID.');
   const chosen = resolveActivity_(activity);
+  if (chosen.background_figure) requireOwnFigure_(instructor_id, chosen.background_figure);
 
   const sh = getSheetByName(SHEET_SESSIONS);
   ensureHeaderColumn_(sh, 'submission_type');
   ensureHeaderColumn_(sh, 'peer_review');
   ensureHeaderColumn_(sh, 'sketch_background');
   ensureHeaderColumn_(sh, 'sketch_image_url');
+  ensureHeaderColumn_(sh, 'sketch_figure_id');
   const { header: hdr, rows } = readTable(sh);
 
   // Required columns only (these must exist in your sheet)
@@ -212,6 +221,7 @@ function apiStartSession(token, session_id, duration_mins, activity){
     setIfExists(sh, base, hdr, 'peer_review', chosen.peer_review ? 'TRUE' : 'FALSE');
     setIfExists(sh, base, hdr, 'sketch_background', chosen.background);
     setIfExists(sh, base, hdr, 'sketch_image_url', chosen.background_url);
+    setIfExists(sh, base, hdr, 'sketch_figure_id', chosen.background_figure);
   };
 
   if (rowIndex >= 0) {
@@ -268,6 +278,7 @@ function apiStartSession(token, session_id, duration_mins, activity){
         case 'peer_review':   return chosen.peer_review ? 'TRUE' : 'FALSE';
         case 'sketch_background': return chosen.background;
         case 'sketch_image_url': return chosen.background_url;
+        case 'sketch_figure_id': return chosen.background_figure;
         default:              return '';
       }
     });
@@ -391,7 +402,7 @@ function apiGetSessionState(token, session_id) {
  *   2. their most recently opened peer review (peer_open = TRUE), open or past its deadline;
  *   3. otherwise nothing.
  * Returns { ok, session_id, phase: 'writing'|'review'|'', writing_open, reviews_open, peer_until,
- *           settings: { submission_type, peer_review, preset, label, background, background_url } }.
+ *           settings: { submission_type, peer_review, preset, label, background, background_url, background_figure } }.
  * Polled by student pages, so results are cached briefly (see STUDENT_VIEW_CACHE_SECS).
  */
 function apiGetStudentView(instructor_id) {

@@ -4,6 +4,8 @@
     let INSTRUCTOR_ID = '';
     let AUTH_TOKEN = ''; // issued by apiInstructorLogin; required by every instructor API call
     let SESSION_STATE = null; // latest apiGetSessionState result for currentSessionId
+    let LOGIN_FIGURE = '';    // image pasted/chosen on the login form (shrunk data URL), not yet saved
+    let LIVE_FIGURE = null;   // new figure in the session's figure panel: { data } or { url }
     let ACTIVITY_NOTE = '';   // shown next to the activity label, e.g. when settings were kept
     let currentSessionId = '';
     let RESPONSES = [];
@@ -120,12 +122,15 @@
       };
       if (parts.indexOf('sketch') === -1) { activity.background = 'blank'; activity.background_url = ''; }
       if (activity.background !== 'image') activity.background_url = '';
+      const upload = activity.background === 'image' ? LOGIN_FIGURE : '';   // a pasted/chosen image wins over a link
+      if (upload) activity.background_url = '';
       if (!inst || !pw) { msg.style.color='#c00'; msg.textContent='Enter instructor ID and password.'; btn.disabled=false; return; }
       if (!sessionId) { msg.style.color='#c00'; msg.textContent='Enter a session ID.'; btn.disabled=false; return; }
       if (!parts.length) { msg.style.color='#c00'; msg.textContent='Tick at least one thing for students to submit.'; btn.disabled=false; return; }
-      if (activity.background === 'image' && !sketchImageUrl(activity.background_url)) {
+      if (activity.background === 'image' && !upload && !sketchImageUrl(activity.background_url)) {
         msg.style.color='#c00';
-        msg.textContent = activity.background_url ? 'The figure address must be a web link starting with https://.' : 'Enter the address (URL) of the figure for students to draw on.';
+        msg.textContent = activity.background_url ? 'The figure address must be a web link starting with https://.'
+          : 'Add a figure for students to draw on: paste or choose an image, or enter its address.';
         btn.disabled=false; return;
       }
       if (!inAppsScript()) { msg.style.color='#c00'; msg.textContent='Not running as an Apps Script web app.'; btn.disabled=false; return; }
@@ -134,6 +139,28 @@
         .withSuccessHandler(function (loginRes) {
           if (loginRes && loginRes.ok) {
             AUTH_TOKEN = loginRes.token || '';
+            if (upload) {
+              // Save the figure first, then start the session on it
+              msg.style.color = ''; msg.textContent = 'Saving the figure…';
+              google.script.run
+                .withSuccessHandler(function (up) {
+                  rememberSketchFigure(up.figure_id, upload);
+                  activity.background_figure = up.figure_id;
+                  start();
+                })
+                .withFailureHandler(function (err) {
+                  msg.style.color = '#c00';
+                  msg.textContent = 'Could not save the figure: ' + (err && err.message ? err.message : err);
+                  btn.disabled = false;
+                })
+                .apiUploadFigure(AUTH_TOKEN, upload);
+            } else start();
+          } else {
+            msg.style.color = '#c00';
+            msg.textContent = (loginRes && loginRes.error) || 'Invalid login.';
+            btn.disabled = false;
+          }
+          function start() {
             google.script.run
               .withSuccessHandler(function (startRes) {
                 if (startRes && startRes.ok) {
@@ -161,10 +188,6 @@
                 btn.disabled = false;
               })
               .apiStartSession(AUTH_TOKEN, sessionId, duration_mins, activity);
-          } else {
-            msg.style.color = '#c00';
-            msg.textContent = (loginRes && loginRes.error) || 'Invalid login.';
-            btn.disabled = false;
           }
         })
         .withFailureHandler(function (err) {
@@ -192,6 +215,7 @@
     }
     /** Show the figure as students will see it, or say why it can't be used */
     function previewFigure(){
+      if (LOGIN_FIGURE) return;   // a pasted/chosen image is shown instead
       const raw = (document.getElementById('sketchImageUrl').value || '').trim();
       const url = sketchImageUrl(raw);
       const img = document.getElementById('figurePreview');
@@ -269,6 +293,10 @@
       }
       const peerControls = document.getElementById('peerControls');
       if (peerControls) peerControls.style.display = settings.peer_review ? '' : 'none';
+      const drawing = String(settings.submission_type || '').split('_').indexOf('sketch') >= 0;
+      document.getElementById('figureBtn').style.display = drawing ? '' : 'none';
+      if (!drawing) document.getElementById('figurePanel').style.display = 'none';
+      renderCurrentFigure();
       const writingEl = document.getElementById('writingState');
       if (writingEl) {
         writingEl.textContent = !st.writing_open ? 'Writing closed'
@@ -743,6 +771,169 @@
           .apiUpdateResponse(AUTH_TOKEN, responseId, { is_hidden: 'TRUE' });
       });
     }
+    // --- Figures to draw on: pasted or chosen images, and links ---
+    const FIGURE_MAX_SIDE = 1600;          // px; the pad is 600 x 400, shown up to ~1100 wide
+    const FIGURE_MAX_DATA = 1900000;       // data URL characters (~1.4 MB image; the server allows 1.5 MB)
+    /** Shrink an image file in the browser. Calls done(dataUrl) or fail(message). */
+    function shrinkFigure(file, done, fail){
+      if (!file || !/^image\//.test(file.type || '')) { fail('That file isn\'t an image.'); return; }
+      const src = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(src);
+        let scale = Math.min(1, FIGURE_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          const ctx = c.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);   // transparent areas: white
+          ctx.drawImage(img, 0, 0, c.width, c.height);
+          const q = attempt < 2 ? 0.9 - attempt * 0.15 : 0.75;
+          let data = c.toDataURL('image/webp', q);
+          if (!/^data:image\/webp/.test(data)) data = c.toDataURL('image/jpeg', q);   // no WebP encoder (older Safari)
+          if (data.length <= FIGURE_MAX_DATA) { done(data); return; }
+          if (attempt >= 1) scale *= 0.75;
+        }
+        fail('That image is too large. Try a smaller screenshot.');
+      };
+      img.onerror = () => { URL.revokeObjectURL(src); fail('That image couldn\'t be read.'); };
+      img.src = src;
+    }
+    function figureFileChosen(input, where){
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (file) takeFigureFile(file, where);
+    }
+    /** A pasted, dropped or chosen image, for the login form ('login') or the live panel ('live') */
+    function takeFigureFile(file, where){
+      const msgEl = document.getElementById(where === 'login' ? 'figureMsg' : 'liveFigureMsg');
+      msgEl.style.color = ''; msgEl.textContent = 'Preparing image…';
+      shrinkFigure(file, data => {
+        msgEl.textContent = '';
+        if (where === 'login') setLoginFigure(data); else setLiveFigure({ data });
+      }, err => { msgEl.style.color = '#c00'; msgEl.textContent = err; });
+    }
+    function setLoginFigure(data){
+      LOGIN_FIGURE = data;
+      const img = document.getElementById('figurePreview');
+      img.onload = img.onerror = null;
+      img.src = data; img.style.display = '';
+      document.getElementById('loginFigureClear').style.display = '';
+      const msg = document.getElementById('figureMsg');
+      msg.style.color = ''; msg.textContent = 'Students will draw on this image.';
+    }
+    function clearLoginFigure(){
+      LOGIN_FIGURE = '';
+      document.getElementById('loginFigureClear').style.display = 'none';
+      const img = document.getElementById('figurePreview');
+      img.style.display = 'none'; img.removeAttribute('src');
+      document.getElementById('figureMsg').textContent = '';
+      previewFigure();
+    }
+
+    // Live panel: change the figure during the session
+    function toggleFigurePanel(force){
+      const p = document.getElementById('figurePanel');
+      const open = force !== undefined ? force : p.style.display === 'none';
+      p.style.display = open ? '' : 'none';
+      if (open) renderCurrentFigure();
+    }
+    /** What students are drawing on now, as a small picture in the panel */
+    function renderCurrentFigure(){
+      const el = document.getElementById('figureCurrent');
+      const st = SESSION_STATE && SESSION_STATE.settings;
+      if (!el || !st || document.getElementById('figurePanel').style.display === 'none') return;
+      el.innerHTML = sketchSVG({ bg: st.background, img: st.background_url, fig: st.background_figure, s: [] });
+    }
+    function setLiveFigure(fig){
+      LIVE_FIGURE = fig;
+      const img = document.getElementById('liveFigurePreview');
+      const btn = document.getElementById('liveFigureShow');
+      const msg = document.getElementById('liveFigureMsg');
+      if (fig && fig.data) {
+        img.onload = img.onerror = null;
+        img.src = fig.data; img.style.display = '';
+        btn.disabled = false;
+        msg.style.color = ''; msg.textContent = 'Ready: click "Show to students".';
+      } else if (fig && fig.url) {
+        img.onload = () => { if (LIVE_FIGURE === fig) { img.style.display = ''; btn.disabled = false; msg.textContent = ''; } };
+        img.onerror = () => { if (LIVE_FIGURE === fig) { img.style.display = 'none'; btn.disabled = true; msg.style.color = '#c00'; msg.textContent = "This image couldn't be loaded. Check the link, and that it's shared with anyone who has it."; } };
+        img.src = fig.url;
+        msg.style.color = ''; msg.textContent = 'Loading preview…';
+      } else {
+        img.style.display = 'none'; img.removeAttribute('src');
+        btn.disabled = true;
+      }
+    }
+    function liveFigureUrlChanged(){
+      const raw = (document.getElementById('liveFigureUrl').value || '').trim();
+      const url = sketchImageUrl(raw);
+      if (url) { setLiveFigure({ url }); return; }
+      setLiveFigure(null);
+      const msg = document.getElementById('liveFigureMsg');
+      msg.style.color = raw ? '#c00' : ''; msg.textContent = raw ? 'Use a web link starting with https://.' : '';
+    }
+    function setSessionFigure(figure, doneMsg){
+      const msg = document.getElementById('liveFigureMsg');
+      google.script.run
+        .withSuccessHandler(res => {
+          if (SESSION_STATE && res && res.settings) SESSION_STATE.settings = res.settings;
+          setLiveFigure(null);
+          document.getElementById('liveFigureUrl').value = '';
+          msg.style.color = '#0a7'; msg.textContent = doneMsg;
+          renderSessionState();
+        })
+        .withFailureHandler(err => { msg.style.color = '#c00'; msg.textContent = String(err && err.message ? err.message : err); document.getElementById('liveFigureShow').disabled = false; })
+        .apiSetSessionFigure(AUTH_TOKEN, currentSessionId, figure);
+    }
+    function showLiveFigure(){
+      const fig = LIVE_FIGURE;
+      if (!fig || !currentSessionId) return;
+      const msg = document.getElementById('liveFigureMsg');
+      const done = 'Shown to students: their pads update within about 30 seconds. Earlier drawings keep their figure.';
+      document.getElementById('liveFigureShow').disabled = true;
+      if (fig.url) { setSessionFigure({ url: fig.url }, done); return; }
+      msg.style.color = ''; msg.textContent = 'Saving…';
+      google.script.run
+        .withSuccessHandler(up => { rememberSketchFigure(up.figure_id, fig.data); setSessionFigure({ figure_id: up.figure_id }, done); })
+        .withFailureHandler(err => { msg.style.color = '#c00'; msg.textContent = 'Could not save the figure: ' + (err && err.message ? err.message : err); document.getElementById('liveFigureShow').disabled = false; })
+        .apiUploadFigure(AUTH_TOKEN, fig.data);
+    }
+    function clearSessionFigure(){
+      if (!currentSessionId) return;
+      setSessionFigure(null, 'Students now draw on a blank page.');
+    }
+
+    /** Pasting an image: on the login form when Figure is chosen, or (during a drawing
+     *  activity) into the figure panel, which opens. Text pastes are left alone. */
+    function figurePasteTarget(){
+      if (document.getElementById('loginView').style.display !== 'none') {
+        return document.getElementById('figureRow').style.display !== 'none' ? 'login' : '';
+      }
+      return document.getElementById('figureBtn').style.display !== 'none' ? 'live' : '';
+    }
+    document.addEventListener('paste', e => {
+      const items = (e.clipboardData && e.clipboardData.items) ? Array.from(e.clipboardData.items) : [];
+      const item = items.find(it => it.kind === 'file' && /^image\//.test(it.type));
+      const where = item ? figurePasteTarget() : '';
+      if (!where) return;
+      e.preventDefault();
+      if (where === 'live') toggleFigurePanel(true);
+      takeFigureFile(item.getAsFile(), where);
+    });
+    // Dropping an image file on either paste/choose area
+    [['loginFigureDrop', 'login'], ['liveFigureDrop', 'live']].forEach(([id, where]) => {
+      const zone = document.getElementById(id);
+      zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('over'); });
+      zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+      zone.addEventListener('drop', e => {
+        e.preventDefault(); zone.classList.remove('over');
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (file) takeFigureFile(file, where);
+      });
+    });
+
     // --- Save edit & position ---
     // Save an instructor edit when the card loses focus, but only if the text changed
     function saveEdit(id, text){

@@ -75,16 +75,31 @@ Students get a **drawing pad** on the background you chose (blank, grid,
 first-quadrant axes for sketching distributions, scatterplots and curves, or a
 figure to annotate).
 
-- **Figure:** paste the image's address (URL) when you choose **Figure**, and
-  check the preview under the box. It must start with `https://` and be viewable
+- **Figure:** choose **Figure**, then either **paste a screenshot** (Ctrl+V /
+  ⌘V), choose or drag in an image file, or enter an image's web address. The
+  figure is fitted inside the pad without stretching, and students draw on top
+  of it. If a student's device can't load it, they're told and can still draw.
+- **Changing the figure live:** during a drawing activity, the dashboard's **🖼
+  Figure** button opens a panel showing what students are drawing on now. Paste
+  a new screenshot (pasting an image anywhere on the dashboard opens the panel),
+  choose a file or enter a link, check the preview, then click **Show to
+  students**. Their pads switch within about 30 seconds. **Blank page** removes
+  the figure.
+- **Where screenshots go:** the browser shrinks the image (longest side 1600
+  px, WebP or JPEG), then it's saved as a private file in the Drive of the
+  account that deployed the app, in `StatChat figures/<instructor_id>/`. That's
+  true for every instructor, since the app runs as the deploying account. Nothing
+  is shared: students' pages get the image through the app, which only hands
+  out files inside the `StatChat figures` folder. Each instructor can only use
+  their own figures. Deleting a file there removes it from drawings made on it.
+- **Linked figures:** the address must start with `https://` and be viewable
   by anyone with the link. A Google Drive share link works if the file is shared
   with *Anyone with the link*; it's converted to a direct image link
-  automatically. The figure is fitted inside the pad without stretching, and
-  students draw on top of it. If a student's device can't load it, they're told
-  and can still draw. Each drawing records the figure it was made on (the server
-  adds it, so students can't substitute another image), so changing the figure
-  later doesn't affect earlier drawings. The image itself isn't copied: if it's
-  deleted or unshared, drawings show without it.
+  automatically. The image isn't copied: if it's deleted or unshared, drawings
+  show without it.
+- Each drawing records the figure it was made on (the server adds it, so
+  students can't substitute another image), so changing the figure later
+  doesn't affect earlier drawings.
 
 - **Tools:** black, blue and red pens, an eraser that removes whole lines,
   Undo, and Clear (which Undo can bring back). It works with a finger, stylus
@@ -126,6 +141,7 @@ src/                  Everything deployed to Apps Script (clasp's rootDir)
   Responses.gs        Student submissions, instructor moderation
   PeerReview.gs       Peer review: assignment, submission, unlock, ratings
   Profanity.gs        Profanity list, masking, detection
+  Figures.gs          Uploaded figures (screenshots) in Drive, for drawing activities
   Web.gs              doGet/doPost and include() for HTML partials
   student.html        Student page: markup, pulls in the partials below
   student_styles.html / student_core.html / student_math.html / student_sketch.html / student_peer.html
@@ -159,6 +175,16 @@ One-time setup:
 `src/appsscript.json` is the project's manifest (time zone, and the web app
 runs as the deploying user and is open to anyone). It's committed, and `clasp
 push` uploads it with the code.
+
+**Drive access (once, for figure uploads):** uploaded figures are saved to
+Drive, so the app needs permission to use the deploying account's Drive. Google
+only asks for it in the Apps Script editor, and until it's granted the web app
+shows an authorisation error to everyone. So the first time you deploy a
+version with `Figures.gs`: `clasp push`, then in the editor choose
+`authorizeFigureStorage` in the function menu, click **Run** and accept (Google
+lists it as access to see and edit your Drive files; the app only uses the
+`StatChat figures` folder). Then deploy. The folder's ID is kept in Script
+Properties (`FIGURE_FOLDER_ID`); if the folder is deleted, a new one is made.
 
 Each release:
 
@@ -307,7 +333,8 @@ Recommended columns (features that use them are skipped if they're missing):
 - submission_type — the ticked parts, e.g. `text`, `math_sketch` or `text_math_sketch` (added automatically; see [Activities](#activities))
 - peer_review — `TRUE`/`FALSE` (added automatically)
 - sketch_background — `blank`, `grid`, `axes` or `image` (added automatically)
-- sketch_image_url — the figure's address when sketch_background is `image` (added automatically)
+- sketch_image_url — a linked figure's address when sketch_background is `image` (added automatically)
+- sketch_figure_id — an uploaded figure's Drive file ID when sketch_background is `image` (added automatically)
 
 ---
 

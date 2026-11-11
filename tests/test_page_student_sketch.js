@@ -130,3 +130,25 @@ pollView();
 eq('new figure picked up without a reload', SKETCH_PAD.bg.innerHTML.includes('other.png'), true);
 eq('SVG: unsafe figure address not drawn', sketchSVG({ bg: 'image', img: 'javascript:alert(1)', s: [] }).includes('<image'), false);
 eq('SVG: & in an address is escaped', sketchSVG({ bg: 'image', img: 'https://e.org/a.png?x=1&y=2', s: [] }).includes('x=1&amp;y=2'), true);
+
+// Uploaded figure: fetched once through the app, drawn under the strokes, id saved
+const SHOT = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const upId = __SERVER.apiUploadFigure(tok, SHOT).figure_id;
+__SERVER.apiStartSession(tok, 'fig1', 64, { submission_type: 'sketch', peer_review: false, background: 'image', background_figure: upId });
+const callsBefore = __serverCalls.filter(n => n === 'apiGetFigure').length;
+pollView();
+eq('uploaded figure fetched and on the pad', [SKETCH_FIG, SKETCH_FIGURES[upId].data, SKETCH_PAD.bg.innerHTML.includes('href="' + SHOT + '"')], [upId, SHOT, true]);
+eq('no "couldn\'t load" note', el('sketchFigureNote').style.display, 'none');
+draw([[200, 200], [240, 220]]);
+submitResponse();
+eq('saved with the figure id', [stored().slice(-1)[0].sketch.bg, stored().slice(-1)[0].sketch.fig], ['image', upId]);
+sketchSVG(stored().slice(-1)[0].sketch); sketchSVG(stored().slice(-1)[0].sketch);
+eq('fetched only once per page', __serverCalls.filter(n => n === 'apiGetFigure').length - callsBefore, 1);
+eq('SVG for an uploaded figure', sketchSVG({ bg: 'image', fig: upId, s: [] }).includes('<image data-fig="' + upId + '" href="' + SHOT + '"'), true);
+eq('SVG: bad figure id not used', sketchSVG({ bg: 'image', fig: '"><script>', s: [] }).includes('script'), false);
+// A figure that can't be fetched: the student is told, and can still draw
+__SERVER.apiStartSession(tok, 'fig1', 64, { submission_type: 'sketch', peer_review: false, background: 'image', background_url: 'https://example.org/x.png' });
+const S2 = sheetRows('Sessions'); const fr = S2.findIndex(r => r[0] === 'fig1');
+S2[fr][S2[0].indexOf('sketch_background')] = 'image'; S2[fr][S2[0].indexOf('sketch_figure_id')] = 'file_missing_00001'; __cache.clear();
+pollView();
+eq('missing figure: note shown, pad still enabled', [el('sketchFigureNote').style.display, SKETCH_ENABLED], ['block', true]);

@@ -72,7 +72,7 @@
       const v = (res && res.ok && res.session_id) ? res : null;
       const st = v && v.settings ? v.settings : null;
       const sig = v
-        ? [v.session_id, v.phase, v.writing_open, v.reviews_open, v.peer_until, st && st.submission_type, st && st.peer_review, st && st.background, st && st.background_url].join('|')
+        ? [v.session_id, v.phase, v.writing_open, v.reviews_open, v.peer_until, st && st.submission_type, st && st.peer_review, st && st.background, st && st.background_url, st && st.background_figure].join('|')
         : 'none';
       if (sig === VIEW_SIG) return;
       const first = VIEW_SIG === '';
